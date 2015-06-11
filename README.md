@@ -4,7 +4,7 @@ This is a project that will use an ESP8266 together with two AS5048A magnetic ro
 
 The ESP8266 is advertised as a Serial to WiFi adapter, but it has EEPROM and a 32Bit processor on it, and there is integration into the Arduino IDE.  https://github.com/esp8266/Arduino
 
-The AS5048A has 14bit resolution (16,384 tics per revolution), and is an absolute position sensor.  The compoany that makes them have nice demo boards available:
+The AS5048A has 14bit resolution (16,384 tics per revolution), and is an absolute position sensor.  The company that makes them have nice demo boards available:
 
 http://ams.com/eng/Support/Demoboards/Position-Sensors/Rotary-Magnetic-Position-Sensors/AS5048A-Adapterboard
 
