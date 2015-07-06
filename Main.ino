@@ -150,7 +150,7 @@ float Angle(int axis) {
   command = 0x8000 | SPI_CMD_READ;              // read command is 15 1's so to make it even parity add a 1 in the 16th bit
   command |= 0x3FFF;                            // this code is not idiomatic.  Should use a parity procedure need to fix it later
   cmd_highbyte = highByte(command);             // split it into high and low byte
-  cmd_lowbyte = lowByte(command);               //
+  cmd_lowbyte = lowByte(command);
   digitalWrite(axis,LOW);                        // select the chip
   data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
   data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
@@ -159,8 +159,8 @@ float Angle(int axis) {
   for (myCounter = 0; myCounter <numToAverage; myCounter++ ){    
     digitalWrite(axis,LOW);
     data_highbyte = SPI.transfer(cmd_highbyte);  
-    data_lowbyte = SPI.transfer(cmd_lowbyte);    //
-    digitalWrite(axis,HIGH);                      // close the chip
+    data_lowbyte = SPI.transfer(cmd_lowbyte);    
+    digitalWrite(axis,HIGH);                     // close the chip
     data = data_highbyte;                        // Store the high byte in my 16 bit varriable
     data = data << 8;                            // shift left 8 bits
     data = data | data_lowbyte;                  // tack on the low byte
