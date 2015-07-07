@@ -13,6 +13,11 @@
  July 5, 2015
  Added running as a WiFi Access point
  Added code to read an AS5048 
+
+ July 6, 2015
+ Added parity calculations to the commands
+ Added second AS5048 with daisychain mode but for some reason it has both axis getting the same value.
+
  
  */
 
@@ -24,8 +29,8 @@
 
 #define AP 
 
-char ssid[] = "********"; //  your network SSID (name)
-char pass[] = "********";    // your network password (use for WPA, or use as key for WEP)
+char ssid[] = "braapppp"; //  your network SSID (name)
+char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
 
 const char *apssid = "ESPap";
 const char *appassword = "gofish";
@@ -38,19 +43,21 @@ int status = WL_IDLE_STATUS;
 // for example...
 // http://ams.com/eng/Support/Demoboards/Position-Sensors/Rotary-Magnetic-Position-Sensors/AS5048A-Adapterboard  
 
-#define SPI_CMD_READ 0x4000
-#define SPI_REG_AGC 0x3FFD
-#define SPI_REG_MAG 0x3FFE
-#define SPI_REG_DATA 0x3FFF
-#define SPI_REG_ERR 0x1
+#define AS5048_CMD_READ 0x4000    
+#define AS5048_REG_AGC 0x3FFD
+#define AS5048_REG_MAG 0x3FFE
+#define AS5048_REG_DATA 0x3FFF
+#define AS5048_REG_ERR 0x1
+#define AS5048_CMD_NOP 0x0
 
 int numToAverage=50;
-int sslAzimuth=15;
-//int sslAltitude=10;
+int ssl=15;
 byte cmd_highbyte = 0;
 byte cmd_lowbyte = 0;
-byte data_highbyte = 0;
-byte data_lowbyte = 0;
+byte alt_data_highbyte = 0;
+byte alt_data_lowbyte = 0;
+byte azt_data_highbyte = 0;
+byte azt_data_lowbyte = 0;
 word command = 0;
 word data = 0;
 unsigned int value = 0;
@@ -65,15 +72,6 @@ boolean alreadyConnected = false; // whether or not the client was connected pre
 void setup() {
   //Initialize serial and wait for port to open:
   Serial.begin(115200);
-
-  pinMode(sslAzimuth, OUTPUT);
-//  pinMode(sslAltitude, OUTPUT);
-  SPI.begin();                                          // Wake up the buss
-  SPI.setBitOrder(MSBFIRST);                            // AS5048 is a Most Significant Bit first
-  SPI.setDataMode(SPI_MODE1);                           // AS5048 uses Mode 1
-  digitalWrite(sslAzimuth, LOW);                        // Select the Azimuth axis
-  data_highbyte=SPI.transfer(SPI_CMD_READ&SPI_REG_ERR); // send the initial read command
-  digitalWrite(sslAzimuth, HIGH);                       // disable the chip
   
   #ifdef AP
     Serial.println("Setting up WiFi Access Point");
@@ -101,6 +99,21 @@ void setup() {
   #else
     printWifiStatus();
   #endif
+
+  pinMode(ssl, OUTPUT);
+  SPI.begin();                                                        // Wake up the buss
+  SPI.setBitOrder(MSBFIRST);                                          // AS5048 is a Most Significant Bit first
+  SPI.setDataMode(SPI_MODE1);                                         // AS5048 uses Mode 1
+  command = AS5048_CMD_READ | AS5048_REG_DATA;                        // Set up the command we will send
+  command = command | calcEvenParity(command);                        // assign the parity bit
+  cmd_highbyte = highByte(command);                                   // split it into bytes
+  cmd_lowbyte = lowByte(command);                                     //
+  digitalWrite(ssl, LOW);                                             // Drop ssl to enable the AS5048's
+  alt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the initial read command
+  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+  azt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the second read command
+  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+  digitalWrite(ssl, HIGH);                                            // disable the AS5048's
 }
 
 void loop() {
@@ -124,11 +137,18 @@ void loop() {
         Serial.print(thisClient.available());
         Serial.println(" characters to be read");
         // lets print a response and discard the rest of the bytes
-        thisClient.print(PadTic(Tic(sslAzimuth)));
-        thisClient.print("\t+00000\r\n");
-        Serial.println(Angle(sslAzimuth));
-        Serial.println(Tic(sslAzimuth));
-        Serial.println(PadTic(Tic(sslAzimuth)));
+        thisClient.print(PadTic(Tic("Azimuth")));
+        thisClient.print("\t");
+        thisClient.print(PadTic(Tic("Altitude")));
+        thisClient.print("\r\n");
+        Serial.print("Azimuth Angle: ");
+        Serial.print(Angle("Azimuth"));
+        Serial.print(" Altituge Angle: ");
+        Serial.println(Angle("Altitude"));
+        Serial.print("Azimuth tic: ");
+        Serial.print(PadTic(Tic("Azimuth")));
+        Serial.print(" Altitude tic: ");
+        Serial.println(PadTic(Tic("Altitude")));
         // discard remaining bytes
         thisClient.flush();
       }
@@ -141,30 +161,40 @@ void loop() {
   }
 }
 
-float Angle(int axis) {
+float Angle(String axis) {
   // take an axis and read that sensor to get the angle
   float angles[numToAverage];
   float angle;
   float AverageAngle = 0;
   int myCounter = 0;
-  command = 0x8000 | SPI_CMD_READ;              // read command is 15 1's so to make it even parity add a 1 in the 16th bit
-  command |= 0x3FFF;                            // this code is not idiomatic.  Should use a parity procedure need to fix it later
-  cmd_highbyte = highByte(command);             // split it into high and low byte
-  cmd_lowbyte = lowByte(command);
-  digitalWrite(axis,LOW);                        // select the chip
-  data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
-  data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
-  digitalWrite(axis,HIGH);                       // but throw those two away as we don't know what the previous command was
+  command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
+  command |= calcEvenParity(command);               // or with the parity of the command
+  cmd_highbyte = highByte(command);                 // split it into high and low byte
+  cmd_lowbyte = lowByte(command);                   //
+  digitalWrite(ssl,LOW);                            // select the chip
+  alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
+  azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
+  digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was
 
   for (myCounter = 0; myCounter <numToAverage; myCounter++ ){    
-    digitalWrite(axis,LOW);
-    data_highbyte = SPI.transfer(cmd_highbyte);  
-    data_lowbyte = SPI.transfer(cmd_lowbyte);    
-    digitalWrite(axis,HIGH);                     // close the chip
-    data = data_highbyte;                        // Store the high byte in my 16 bit varriable
-    data = data << 8;                            // shift left 8 bits
-    data = data | data_lowbyte;                  // tack on the low byte
-    value = data & 0x3FFF;                       // mask off the bottom 14 bits
+    digitalWrite(ssl,LOW);                          
+    alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
+    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
+    azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
+    digitalWrite(ssl,HIGH);                         // close the chip
+    if (axis =  "Altitude") {
+      data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
+      data = data << 8;                             // shift left 8 bits
+      data = data | alt_data_lowbyte;               // tack on the low byte
+    } else {
+      data = azt_data_highbyte;
+      data = data << 8;
+      data = data | azt_data_lowbyte;
+    }
+    value = data & 0x3FFF;                      // mask off the top two bits
     angles[myCounter] = (float(value)/16383)*360;// calculate the angle that represents
   }
   for (myCounter = 0; myCounter <numToAverage; myCounter++){
@@ -174,37 +204,72 @@ float Angle(int axis) {
   return AverageAngle;
 }
 
-unsigned int Tic(int axis) {
-  // take an axis and read that sensor to get the angle
+unsigned int Tic(String axis) {
+  // take an axis and read that sensor to get the raw encoder value
   unsigned int tics[numToAverage];
-//  unsigned int tic;
-  unsigned int averageTics = 0;
+  unsigned int tic;
+  float averageTic = 0;
   int myCounter = 0;
-  command = 0x8000 | SPI_CMD_READ;              // read command is 15 1's so to make it even parity add a 1 in the 16th bit
-  command |= 0x3FFF;                            // this code is not idiomatic.  Should use a parity procedure need to fix it later
-  cmd_highbyte = highByte(command);             // split it into high and low byte
-  cmd_lowbyte = lowByte(command);               //
-  digitalWrite(axis,LOW);                       // select the chip
-  data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
-  data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
-  digitalWrite(axis,HIGH);                      // but throw those two away as we don't know what the previous command was
+  command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
+  command |= calcEvenParity(command);               // or with the parity of the command
+  cmd_highbyte = highByte(command);                 // split it into high and low byte
+  cmd_lowbyte = lowByte(command);                   //
+  digitalWrite(ssl,LOW);                            // select the chip
+  alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
+  azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
+  digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was
+/*
+  command = AS5048_CMD_NOP;
+  command |= calcEvenParity(command);
+  cmd_highbyte = highByte(command);
+  cmd_lowbyte = lowByte(command);
+  digitalWrite(ssl,LOW);
+  alt_data_highbyte = SPI.transfer(cmd_highbyte);
+  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+  azt_data_highbyte = SPI.transfer(cmd_highbyte);
+  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+  digitalWrite(ssl,HIGH);
+*/  
+
 
   for (myCounter = 0; myCounter <numToAverage; myCounter++ ){    
-    digitalWrite(axis,LOW);
-    data_highbyte = SPI.transfer(cmd_highbyte);  
-    data_lowbyte = SPI.transfer(cmd_lowbyte);   //
-    digitalWrite(axis,HIGH);                    // close the chip
-    data = data_highbyte;                       // Store the high byte in my 16 bit varriable
-    data = data << 8;                           // shift left 8 bits
-    data = data | data_lowbyte;                 // tack on the low byte
-    value = data & 0x3FFF;                      // mask off the bottom 14 bits
-    tics[myCounter] = value;                    // put the value into the array
+    digitalWrite(ssl,LOW);                          
+    alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
+    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
+    azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
+    digitalWrite(ssl,HIGH);                         // close the chip
+/*
+    command = AS5048_CMD_NOP;
+    command |= calcEvenParity(command);
+    cmd_highbyte = highByte(command);
+    cmd_lowbyte = lowByte(command);
+    digitalWrite(ssl,LOW);
+    alt_data_highbyte = SPI.transfer(cmd_highbyte);
+    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+    azt_data_highbyte = SPI.transfer(cmd_highbyte);
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+    digitalWrite(ssl,HIGH);
+*/    
+    if (axis =  "Altitude") {
+      data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
+      data = data << 8;                             // shift left 8 bits
+      data = data | alt_data_lowbyte;               // tack on the low byte
+    } else {
+      data = azt_data_highbyte;
+      data = data << 8;
+      data = data | azt_data_lowbyte;
+    }
+    value = data & 0x3FFF;                          // mask off the top two bits
+    tics[myCounter] = (value);                      // calculate the angle that represents
   }
   for (myCounter = 0; myCounter <numToAverage; myCounter++){
-    averageTics = averageTics + tics[myCounter];
+    averageTic = averageTic + tics[myCounter];
   }
-  averageTics = averageTics/numToAverage;
-  return averageTics;
+  averageTic = averageTic/numToAverage;
+  return averageTic;
 }
 
 // pad the Tics value with leading zeros and return a string
@@ -222,6 +287,23 @@ String PadTic(unsigned int tic){
     paddedTic = "+" + String(tic);
 
   return paddedTic;
+}
+
+// Calculate Even parity of word
+byte calcEvenParity(word value) {
+  byte count = 0;
+  byte i;
+  // loop through the 16 bits 
+  for (i = 0; i < 16; i++) {
+    // if the rightmost bit is 1 increment our counter
+    if (value & 0x1) {
+      count++;
+    }
+    // shift off the rightmost bit
+    value >>=1;
+  }
+  // all odd binaries end in 1
+  return count & 0x1;
 }
 
 void printWifiStatus() {
