@@ -163,9 +163,13 @@ void loop() {
 
 float Angle(String axis) {
   // take an axis and read that sensor to get the angle
-  float angles[numToAverage];
+  float angles[numToAverage];  // this works for small changes away from 0 degrees
+  float xCoord[numToAverage];  // but we need to do some math to make averages
+  float yCoord[numToAverage];  // work for circular measurements
   float angle;
-  float AverageAngle = 0;
+  float averageAngle = 0;
+  float averageX = 0;
+  float averageY = 0;
   int myCounter = 0;
   command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
   command |= calcEvenParity(command)<<15;           // or with the parity of the command
@@ -196,17 +200,30 @@ float Angle(String axis) {
     }
     value = data & 0x3FFF;                      // mask off the top two bits
     angles[myCounter] = (float(value)/16383)*360;// calculate the angle that represents
+    xCoord[myCounter] = cos(angles[myCounter] * DEG_TO_RAD);
+    yCoord[myCounter] = sin(angles[myCounter] * DEG_TO_RAD);
   }
   for (myCounter = 0; myCounter <numToAverage; myCounter++){
-    AverageAngle = AverageAngle + angles[myCounter];
+    averageAngle = averageAngle + angles[myCounter];
+    averageX = averageX + xCoord[myCounter];
+    averageY = averageY + xCoord[myCounter];
   }
-  AverageAngle = AverageAngle/numToAverage;
-  return AverageAngle;
+  averageAngle = averageAngle/numToAverage;
+  averageX = averageX/numToAverage;
+  averageY = averageY/numToAverage;
+  averageAngle = atan2(averageX,averageY) * RAD_TO_DEG;
+  return averageAngle;
 }
 
 unsigned int Tic(String axis) {
   // take an axis and read that sensor to get the raw encoder value
-  unsigned int tics[numToAverage];
+ // unsigned int tics[numToAverage];
+  float angles[numToAverage];
+  float xCoord[numToAverage];
+  float yCoord[numToAVerage];
+  float averageX = 0;
+  float averageY = 0;
+  float angle;
   unsigned int tic;
   float averageTic = 0;
   int myCounter = 0;
@@ -240,12 +257,20 @@ unsigned int Tic(String axis) {
       data = data | azt_data_lowbyte;
     }
     value = data & 0x3FFF;                          // mask off the top two bits
-    tics[myCounter] = (value);                      // calculate the angle that represents
+    angles[myCounter] = (float(value)/16383)*360;   // calculate the angle that represents
+    xCoord[myCounter] = cos(angles[myCounter]);
+    yCoord[myCounter] = sin(angles[myCounter]);
   }
   for (myCounter = 0; myCounter <numToAverage; myCounter++){
-    averageTic = averageTic + tics[myCounter];
+    averageAngle = averageAngle + angless[myCounter];
+    averageX = averageX + xCoord[myCounter];
+    averageY = averageY + yCoord[myCounter];
   }
-  averageTic = averageTic/numToAverage;
+  averageAngle = averageAngle/numToAverage;
+  averageX = averageX/numToAverage;
+  averageY = averageY/numToAverage;
+  averageAngle = atan2(averageX, averageY);
+  averageTic = (int)(averageAngle*16383/360);
   return averageTic;
 }
 
