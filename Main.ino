@@ -105,7 +105,7 @@ void setup() {
   SPI.setBitOrder(MSBFIRST);                                          // AS5048 is a Most Significant Bit first
   SPI.setDataMode(SPI_MODE1);                                         // AS5048 uses Mode 1
   command = AS5048_CMD_READ | AS5048_REG_DATA;                        // Set up the command we will send
-  command = command | calcEvenParity(command);                        // assign the parity bit
+  command = command | calcEvenParity(command)<<15;                    // assign the parity bit
   cmd_highbyte = highByte(command);                                   // split it into bytes
   cmd_lowbyte = lowByte(command);                                     //
   digitalWrite(ssl, LOW);                                             // Drop ssl to enable the AS5048's
@@ -168,9 +168,9 @@ float Angle(String axis) {
   float AverageAngle = 0;
   int myCounter = 0;
   command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
-  command |= calcEvenParity(command);               // or with the parity of the command
+  command |= calcEvenParity(command)<<15;           // or with the parity of the command
   cmd_highbyte = highByte(command);                 // split it into high and low byte
-  cmd_lowbyte = lowByte(command);                   //
+  cmd_lowbyte = lowByte(command);
   digitalWrite(ssl,LOW);                            // select the chip
   alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
   alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
@@ -183,7 +183,7 @@ float Angle(String axis) {
     alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
     alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
     azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
     digitalWrite(ssl,HIGH);                         // close the chip
     if (axis ==  "Altitude") {
       data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
@@ -211,27 +211,15 @@ unsigned int Tic(String axis) {
   float averageTic = 0;
   int myCounter = 0;
   command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
-  command |= calcEvenParity(command);               // or with the parity of the command
+  command |= calcEvenParity(command)<<15;           // or with the parity of the command
   cmd_highbyte = highByte(command);                 // split it into high and low byte
-  cmd_lowbyte = lowByte(command);                   //
+  cmd_lowbyte = lowByte(command);                   
   digitalWrite(ssl,LOW);                            // select the chip
   alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
   alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
   azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
   azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
   digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was
-/*
-  command = AS5048_CMD_NOP;
-  command |= calcEvenParity(command);
-  cmd_highbyte = highByte(command);
-  cmd_lowbyte = lowByte(command);
-  digitalWrite(ssl,LOW);
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  digitalWrite(ssl,HIGH);
-*/  
 
 
   for (myCounter = 0; myCounter <numToAverage; myCounter++ ){    
@@ -239,20 +227,9 @@ unsigned int Tic(String axis) {
     alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
     alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
     azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   
     digitalWrite(ssl,HIGH);                         // close the chip
-/*
-    command = AS5048_CMD_NOP;
-    command |= calcEvenParity(command);
-    cmd_highbyte = highByte(command);
-    cmd_lowbyte = lowByte(command);
-    digitalWrite(ssl,LOW);
-    alt_data_highbyte = SPI.transfer(cmd_highbyte);
-    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-    azt_data_highbyte = SPI.transfer(cmd_highbyte);
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-    digitalWrite(ssl,HIGH);
-*/    
+   
     if (axis ==  "Altitude") {
       data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
       data = data << 8;                             // shift left 8 bits
