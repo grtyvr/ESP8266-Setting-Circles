@@ -185,7 +185,7 @@ float Angle(String axis) {
     azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
     azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
     digitalWrite(ssl,HIGH);                         // close the chip
-    if (axis =  "Altitude") {
+    if (axis ==  "Altitude") {
       data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
       data = data << 8;                             // shift left 8 bits
       data = data | alt_data_lowbyte;               // tack on the low byte
@@ -253,7 +253,7 @@ unsigned int Tic(String axis) {
     azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
     digitalWrite(ssl,HIGH);
 */    
-    if (axis =  "Altitude") {
+    if (axis ==  "Altitude") {
       data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
       data = data << 8;                             // shift left 8 bits
       data = data | alt_data_lowbyte;               // tack on the low byte
