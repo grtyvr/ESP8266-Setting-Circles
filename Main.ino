@@ -165,6 +165,7 @@ float Angle(String axis) {
   // take an axis and read that sensor to get the angle
   float angles[numToAverage];
   float angle;
+  float offset;
   float AverageAngle = 0;
   int myCounter = 0;
   command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
@@ -197,9 +198,17 @@ float Angle(String axis) {
     value = data & 0x3FFF;                      // mask off the top two bits
     angles[myCounter] = (float(value)/16383)*360;// calculate the angle that represents
   }
-  for (myCounter = 0; myCounter <numToAverage; myCounter++){
-    AverageAngle = AverageAngle + angles[myCounter];
-  }
+  for (myCounter = 0; myCounter < numToAverage; myCounter++){
+    // in the first loop we do not have anything to calculate an offest from
+    if (myCounter > 0){
+     offset = abs(angles[0]-angles[myCounter]);
+     // if the offset is too big that means we are crossing zero
+     if (offset > 10){
+      offset = abs(angles[0] - (angles[myCounter] - 360));
+     }
+     AverageAngle = AverageAngle + angles[0] + offset;
+    }
+   }
   AverageAngle = AverageAngle/numToAverage;
   return AverageAngle;
 }
@@ -207,7 +216,9 @@ float Angle(String axis) {
 unsigned int Tic(String axis) {
   // take an axis and read that sensor to get the raw encoder value
   unsigned int tics[numToAverage];
+  unsigned int offsets[numToAverage];
   unsigned int tic;
+  unsigned int offset;
   float averageTic = 0;
   int myCounter = 0;
   command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
@@ -243,7 +254,20 @@ unsigned int Tic(String axis) {
     tics[myCounter] = (value);                      // calculate the angle that represents
   }
   for (myCounter = 0; myCounter <numToAverage; myCounter++){
-    averageTic = averageTic + tics[myCounter];
+   if ( myCounter > 0){
+    // calculate the offset from the initial reading
+    offset = tics[0] - tics[myCounter];
+    if (abs(offset) > 1000){
+     // recalculate offset but with the reflected value
+     if ( offset < 0 ) {
+      offset = tics[0] - ( tics[myCounter] - 16383 );
+     } else {
+      offset = tics[0] - 16383  - tics[myCounter];
+     }
+     offsets[myCounter] = offset;
+     averageOffset = averageOffset + offsets[myCounter];
+     averageTic = averageTic + tics[0] + offset;
+    }
   }
   averageTic = averageTic/numToAverage;
   return averageTic;
