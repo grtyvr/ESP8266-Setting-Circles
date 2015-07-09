@@ -19,7 +19,7 @@
  Added second AS5048 with daisychain mode but for some reason it has both axis getting the same value.
 
  July 7, 2015
- Refactor to move the sensor reading out of the client service loop.
+ Refactor to move the sensor reading out of the client service loop and to add smoothing
  Remove the redundant Angle function and replace it with a simple conversion
 
  
@@ -53,6 +53,20 @@ int status = WL_IDLE_STATUS;
 #define AS5048_REG_DATA 0x3FFF
 #define AS5048_REG_ERR 0x1
 #define AS5048_CMD_NOP 0x0
+
+#define filterNumSamples 20
+
+
+
+// Create a structure that holds the two sensor values that we will be getting back from the daisy chained sensors
+typedef struct {
+ unsigned int azimuthValue;
+ unsigned int altitudeValue;
+} SensorData;
+
+SensorData rawSensorData;
+SensorData smoothSendorData;
+SensorData smoothSensorDataArray[filterNumSamples];  // SensorData Array smoothing
 
 int numToAverage=50;
 int ssl=15;
@@ -111,14 +125,24 @@ void setup() {
   command = AS5048_CMD_READ | AS5048_REG_DATA;                        // Set up the command we will send
   command = command | calcEvenParity(command)<<15;                    // assign the parity bit
   cmd_highbyte = highByte(command);                                   // split it into bytes
-  cmd_lowbyte = lowByte(command);                                     //
-  digitalWrite(ssl, LOW);                                             // Drop ssl to enable the AS5048's
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the initial read command
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the second read command
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  digitalWrite(ssl, HIGH);                                            // disable the AS5048's
-}
+  cmd_lowbyte = lowByte(command);
+  // fill up our smoothing array with data values
+  for ( i = 0; i < filterNumSamples + 2; i++){
+   digitalWrite(ssl, LOW);                                             // Drop ssl to enable the AS5048's
+   alt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the initial read command
+   alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+   azt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the second read command
+   azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+   digitalWrite(ssl, HIGH);                                            // disable the AS5048's
+   data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
+   data = data << 8;                             // shift left 8 bits
+   rawSensorData.altitudeValue = data | alt_data_lowbyte;               // tack on the low byte
+   data = azt_data_highbyte;                     // Store the high byte in my 16 bit varriable
+   data = data << 8;                             // shift left 8 bits
+   rawSensorData.azimuthValue = data | azt_data_lowbyte;               // tack on the low byte
+   smoothSensorData = digitalSmooth(rawSensorData, smoothSensorDataArray);
+  }
+ }
 
 void loop() {
   // wait for a new client:
@@ -213,6 +237,75 @@ unsigned int Tic(String axis) {
   }
   averageTic = averageTic/numToAverage;
   return averageTic;
+}
+SensorData digitalSmooth(SensorData rawSensorData, int *smoothSensorDataArray){
+ // this will not work in all cases
+ // if the sensor is close to wrapping around it is very possible that the smoothing
+ // will not work.  What we should be doing is either:
+ // 1) - Take the sensor value converting to an angle
+ //    - take the x, and y coordinates of the point on a unit circle at that angle
+ //    - use the x and y coordinates in seperate arrays discard highs and lows in both axes
+ //    - take the average value of remaining x and y's
+ //    - convert back to an angle using atan2
+ // 2) calculating the offset from the previous smoothed value and return smoothed value + smooted offset
+ //
+ int j;
+ int k;
+ unsigned int temp;
+ unsigned int top;
+ unsigned int bottom;
+ long totalAzimuth;
+ long totalAltitude;
+ SensorData retSensorData;
+ static int i;
+ static unsigned int sortedAltitude[filterNumSamples];
+ static unsigned int sortedAzimuth[filterNumSamples]
+ boolean done;
+ i = (i + 1) % filterNumSamples;    // increment counter and roll over if necessary
+ smoothSensorData[i] = rawSensorData;
+ // for debugging, perhaps print out our value
+ for (j = 0; j<filterNumSamples; j++){
+  sortedAltitude[j] = smoothSensorDataArray[j].altitudeValue;   // transfer to our sorting array
+  sortedAzimuth[j] = smothSensorDataArray[j].azimuthValue;
+ }
+ // Sort the altitude array
+ done = false;
+ while (!done){
+  for (j = 0; j<(fliterNumSamples - 1); j++) {  // loop through our sorted array
+   if (sortedAltitude[j] > sortedAzimuth[j + 1]) {             // insert our value when we are larger
+    temp = sortedAltitude[j+1];
+    sortedAltitude[j+1] = sortedAltitude[j];
+    sortedAltitude[j] = temp;
+    done = true;
+   }
+  }
+ }
+ // Sort the azimuth array 
+ done = false;
+ while (!done){
+  for (j = 0; j<(fliterNumSamples - 1); j++) {  // loop through our sorted array
+   if (sortedAzimuth[j] > sortedAzimuth[j + 1]) {             // insert our value when we are larger
+    temp = sortedAzimuth[j+1];
+    sortedAzimuth[j+1] = sortedAzimuth[j];
+    sortedAzimuth[j] = temp;
+    done = true;
+   }
+  }
+ }
+ // throw out the top and bottom 10% of samples - throwing out at least one from top and bottom
+ // Altitude
+ bottom = max(((filterNumSamples * 10)/100), 1)
+ top = min((((filterNumSamples * 90) / 100) + 1), (filterNumSamples - 1))
+ k = 0;
+ total = 0;
+ for (j = bottom; j < top; j++){
+  totalAltitude +=sortedAltitude[j];
+  totalAzimuth += sortedAzimuth[j];
+  k++;
+ }
+ retSensorData.altitudeValue = totalAltitude/k;
+ retSensorData.azimuthValue = totalAzimuth/k;
+ return retSensorData;
 }
 
 // pad the Tics value with leading zeros and return a string
