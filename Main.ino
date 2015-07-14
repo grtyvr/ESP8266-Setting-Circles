@@ -16,9 +16,7 @@
 
  July 6, 2015
  Added parity calculations to the commands
- Added second AS5048 with daisychain mode but for some reason it has both axis getting the same value.
 
- 
  */
 
 #include <SPI.h>
@@ -118,8 +116,8 @@ void setup() {
 
 void loop() {
   // wait for a new client:
-  Serial.print(".");
-  delay(1000);
+  // Serial.print(".");
+  delay(1);
   WiFiClient thisClient = server.available();
 
 
@@ -194,8 +192,8 @@ float Angle(String axis) {
       data = data << 8;
       data = data | azt_data_lowbyte;
     }
-    value = data & 0x3FFF;                      // mask off the top two bits
-    angles[myCounter] = (float(value)/16383)*360;// calculate the angle that represents
+    value = data & 0x3FFF;                          // mask off the top two bits
+    angles[myCounter] = (float(value)/16383)*360;   // calculate the angle that represents
   }
   for (myCounter = 0; myCounter <numToAverage; myCounter++){
     AverageAngle = AverageAngle + angles[myCounter];
