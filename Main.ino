@@ -16,12 +16,10 @@
 
  July 6, 2015
  Added parity calculations to the commands
- Added second AS5048 with daisychain mode but for some reason it has both axis getting the same value.
 
- July 7, 2015
- Refactor to move the sensor reading out of the client service loop.
- Remove the redundant Angle function and replace it with a simple conversion
-
+ July 14, 2015
+ Added better code to calculate a running average with throwing out the high and low 15% of values
+ Added a structure to hold the two sensor readings 
  
  */
 
@@ -33,15 +31,16 @@
 
 #define AP 
 
-char ssid[] = "braapppp"; //  your network SSID (name)
-char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
+char ssid[] = "braapppp";     //  your network SSID (name)
+char pass[] = "";             // your network password (use for WPA, or use as key for WEP)
 
 const char *apssid = "ESPap";
 const char *appassword = "gofish";
 
-int keyIndex = 0;            // your network key Index number (needed only for WEP)
+int keyIndex = 0;             // your network key Index number (needed only for WEP)
 
 int status = WL_IDLE_STATUS;
+
 
 // These defines are for the AS5048 
 // for example...
@@ -54,7 +53,12 @@ int status = WL_IDLE_STATUS;
 #define AS5048_REG_ERR 0x1
 #define AS5048_CMD_NOP 0x0
 
-int numToAverage=50;
+// for smoothing sensor data
+#define samplesNumToAverage  20
+unsigned int smoothAzimuthValue[samplesNumToAverage];
+unsigned int smoothAltitudeValue[samplesNumToAverage];
+
+
 int ssl=15;
 byte cmd_highbyte = 0;
 byte cmd_lowbyte = 0;
@@ -63,7 +67,9 @@ byte alt_data_lowbyte = 0;
 byte azt_data_highbyte = 0;
 byte azt_data_lowbyte = 0;
 word command = 0;
-word data = 0;
+unsigned int data = 0;
+word smoothAzimuthData = 0;
+word smoothAltitudeData = 0;
 unsigned int value = 0;
 float angle = 0;
 int i = 0;
@@ -74,7 +80,7 @@ WiFiServer server(23);
 boolean alreadyConnected = false; // whether or not the client was connected previously
 
 void setup() {
-  //Initialize serial and wait for port to open:
+  //Initialize serial
   Serial.begin(115200);
   
   #ifdef AP
@@ -105,81 +111,132 @@ void setup() {
   #endif
 
   pinMode(ssl, OUTPUT);
-  SPI.begin();                                                        // Wake up the buss
+  SPI.begin();                                                        // Wake up the bus
   SPI.setBitOrder(MSBFIRST);                                          // AS5048 is a Most Significant Bit first
   SPI.setDataMode(SPI_MODE1);                                         // AS5048 uses Mode 1
   command = AS5048_CMD_READ | AS5048_REG_DATA;                        // Set up the command we will send
-  command = command | calcEvenParity(command)<<15;                    // assign the parity bit
+  command |= calcEvenParity(command) <<15;                                 // assign the parity bit
   cmd_highbyte = highByte(command);                                   // split it into bytes
   cmd_lowbyte = lowByte(command);                                     //
+  // initialize our smoothing array with data
+  // first time has dummy data
   digitalWrite(ssl, LOW);                                             // Drop ssl to enable the AS5048's
   alt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the initial read command
   alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
   azt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the second read command
   azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
   digitalWrite(ssl, HIGH);                                            // disable the AS5048's
-}
+  for ( i = 0; i <= samplesNumToAverage + 1; i++ ) {
+    digitalWrite(ssl, LOW);                                             // Drop ssl to enable the AS5048's
+    alt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the initial read command
+    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+    azt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the second read command
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
+    digitalWrite(ssl, HIGH);                                            // disable the AS5048's
+    data = azt_data_highbyte;
+    data = data << 8;
+    data = data | azt_data_lowbyte;
+    value = data & 0x3FFF;                          // mask off the top two bits
+    smoothAzimuthData = digitalSmooth(data, smoothAzimuthValue);
+    data = alt_data_highbyte;
+    data = data << 8;
+    data = data | alt_data_lowbyte;
+    value = data & 0x3FFF;                          // mask off the top two bits
+    smoothAltitudeData = digitalSmooth(data, smoothAltitudeValue);
+  }
+}                                                                     // end setup
 
 void loop() {
-  // wait for a new client:
-  Serial.print(".");
+  // Get new sensor readings
   delay(1000);
+  command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
+  command |= calcEvenParity(command) <<15;          // or with the parity of the command
+  cmd_highbyte = highByte(command);                 // split it into high and low byte
+  cmd_lowbyte = lowByte(command);                   //
+  digitalWrite(ssl,LOW);                            // select the chip
+  alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
+  azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
+  digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was
+  digitalWrite(ssl,LOW);                            // select the chip
+  alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
+  azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
+  digitalWrite(ssl,HIGH);                           // 
+  data = azt_data_highbyte;
+  data = data << 8;
+  data = data | azt_data_lowbyte;
+  value = data & 0x3FFF;                          // mask off the top two bits
+  smoothAzimuthData = digitalSmooth(data, smoothAzimuthValue);
+  Serial.print("Smooth Azimuth: ");
+  Serial.println(smoothAzimuthData);
+  data = alt_data_highbyte;
+  data = data << 8;
+  data = data | alt_data_lowbyte;
+  value = data & 0x3FFF;                          // mask off the top two bits
+  smoothAltitudeData = digitalSmooth(data, smoothAltitudeValue);
+
+  //
+  // wait for a new client:
+  // Serial.print(".");
+  delay(1);
   WiFiClient thisClient = server.available();
 
 
   // when the client sends the first byte, say hello:
   while (thisClient) {
     if (!alreadyConnected) {
-//      Serial.println("");
-//      Serial.println("We have a new client");
+      Serial.println("");
+      Serial.println("We have a new client");
       alreadyConnected = true;
     }
     if (thisClient.connected()) {
       if (thisClient.available() > 0) {
         // if there are chars to read....
-//        Serial.print("There are ");
-//        Serial.print(thisClient.available());
-//        Serial.println(" characters to be read");
+        Serial.print("There are ");
+        Serial.print(thisClient.available());
+        Serial.println(" characters to be read");
         // lets print a response and discard the rest of the bytes
-        // Send our response
         thisClient.print(PadTic(Tic("Azimuth")));
         thisClient.print("\t");
         thisClient.print(PadTic(Tic("Altitude")));
         thisClient.print("\r\n");
         Serial.print("Azimuth Angle: ");
-        Serial.print(TicToAngle(Tic("Azimuth")));
+        Serial.print(Angle("Azimuth"));
         Serial.print(" Altituge Angle: ");
-        Serial.println(TicToAngle(Tic("Altitude")));
+        Serial.println(Angle("Altitude"));
         Serial.print("Azimuth tic: ");
         Serial.print(PadTic(Tic("Azimuth")));
         Serial.print(" Altitude tic: ");
         Serial.println(PadTic(Tic("Altitude")));
+        Serial.print("Smoothed Azimuth Value: ");
+        Serial.print(smoothAzimuthData);
+        Serial.print(" Smoothed Altitude Value: ");
+        Serial.println(smoothAltitudeData);
         // discard remaining bytes
         thisClient.flush();
       }
     }
     else {
-//      Serial.println("diconnecting");
+      Serial.println("diconnecting");
       thisClient.stop();
       alreadyConnected = false;
     }
   }
 }
 
-float TicToAngle(unsigned int tic){
- retrun (float(tic)/16384)*360;
-}
-
-unsigned int Tic(String axis) {
-  // take an axis and read that sensor to get the raw encoder value
-  unsigned int tics[numToAverage];
-  unsigned int tic;
-  float averageTic = 0;
+float Angle(String axis) {
+  // take an axis and read that sensor to get the angle
+  float angles[samplesNumToAverage];
+  float angle;
+  float AverageAngle = 0;
   int myCounter = 0;
   command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
-  command |= calcEvenParity(command)<<15;           // or with the parity of the command
+  command |= calcEvenParity(command) <<15;          // or with the parity of the command
   cmd_highbyte = highByte(command);                 // split it into high and low byte
-  cmd_lowbyte = lowByte(command);                   
+  cmd_lowbyte = lowByte(command);                   //
   digitalWrite(ssl,LOW);                            // select the chip
   alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
   alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
@@ -187,15 +244,58 @@ unsigned int Tic(String axis) {
   azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
   digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was
 
-
-  for (myCounter = 0; myCounter <numToAverage; myCounter++ ){    
+  for (myCounter = 0; myCounter <samplesNumToAverage; myCounter++ ){    
     digitalWrite(ssl,LOW);                          
     alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
     alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
     azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
     digitalWrite(ssl,HIGH);                         // close the chip
-   
+    if (axis ==  "Altitude") {
+      data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
+      data = data << 8;                             // shift left 8 bits
+      data = data | alt_data_lowbyte;               // tack on the low byte
+    } else {
+      data = azt_data_highbyte;
+      data = data << 8;
+      data = data | azt_data_lowbyte;
+    }
+    value = data & 0x3FFF;                          // mask off the top two bits
+    angles[myCounter] = (float(value)/16383)*360;   // calculate the angle that represents
+  }
+  for (myCounter = 0; myCounter < samplesNumToAverage; myCounter++){
+    AverageAngle = AverageAngle + angles[myCounter];
+  }
+  AverageAngle = AverageAngle / samplesNumToAverage;
+  return AverageAngle;
+}
+
+unsigned int Tic(String axis) {
+  // take an axis and read that sensor to get the raw encoder value
+  unsigned int tics[samplesNumToAverage];
+  unsigned int tic;
+  float averageTic = 0;
+  int myCounter = 0;
+  command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
+  command |= calcEvenParity(command) <<15;               // or with the parity of the command
+  cmd_highbyte = highByte(command);                 // split it into high and low byte
+  cmd_lowbyte = lowByte(command);                   //
+  digitalWrite(ssl,LOW);                            // select the chip
+  alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
+  azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
+  digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was 
+
+
+  for (myCounter = 0; myCounter < samplesNumToAverage; myCounter++ ){    
+    digitalWrite(ssl,LOW);                          
+    alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
+    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
+    azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
+    digitalWrite(ssl,HIGH);                         // close the chip
+
     if (axis ==  "Altitude") {
       data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
       data = data << 8;                             // shift left 8 bits
@@ -208,10 +308,10 @@ unsigned int Tic(String axis) {
     value = data & 0x3FFF;                          // mask off the top two bits
     tics[myCounter] = (value);                      // calculate the angle that represents
   }
-  for (myCounter = 0; myCounter <numToAverage; myCounter++){
+  for (myCounter = 0; myCounter < samplesNumToAverage; myCounter++){
     averageTic = averageTic + tics[myCounter];
   }
-  averageTic = averageTic/numToAverage;
+  averageTic = averageTic / samplesNumToAverage;
   return averageTic;
 }
 
@@ -266,3 +366,80 @@ void printWifiStatus() {
   Serial.println(" dBm");
 }
 
+// this function takes a rawSensorData reading, inserts the value into the 'oldest' slot
+// transfer the data into a pair of intermediate arrays used for sorting the values
+// inserts the value into the respective sorted arrays according to the following
+// if the value is not an overrun value ( new value << smallest current value )
+unsigned int digitalSmooth(unsigned int rawSensorData, unsigned int *smoothSensorData){
+  int j, k, temp, top, bottom;
+  unsigned int minVal, maxVal;
+  unsigned int offset = 0;
+  long total;
+  static int i;
+  static unsigned int sortedValues[samplesNumToAverage];
+
+  Serial.print("Raw: ");
+  Serial.println(rawSensorData);
+  i = ( i + 1 ) % samplesNumToAverage; // increment the counter and roll over if needed
+  
+  smoothSensorData[i] = rawSensorData; // insert the new value into the oldest slot
+
+  // lets find the min and max in our array
+  minVal = smoothSensorData[0];
+  maxVal = smoothSensorData[0];  
+  for ( j = 1; j < samplesNumToAverage; j++){ // look for min and max values on both axes
+    if ( smoothSensorData[j] < minVal ){
+      minVal = smoothSensorData[j];
+    }
+    if ( smoothSensorData[j] > maxVal){
+      maxVal= smoothSensorData[j];
+    }
+  }
+  /*
+  Serial.print("minVal: ");
+  Serial.println(minVal);
+  Serial.print("maxVal: ");
+  Serial.println(maxVal);
+  */
+  
+  if ( maxVal - minVal > 10000 ) { // if we have a big gap between big and small values it must be
+    offset = 5000; // that we are crossing the zero. So shift away from zero
+  }
+
+  for ( j = 0; j < samplesNumToAverage; j++) { // transfer data to arrays for sorting and averaging
+    sortedValues[j] = (smoothSensorData[j] + offset ) % 16384;
+  }
+  // print unsorted array
+  Serial.println("Unsorted");
+  for ( j = 0; j < samplesNumToAverage; j++){
+    Serial.print(sortedValues[j]);
+    Serial.print(" : ");
+  }
+  Serial.println("");
+  Serial.println("Sorted");
+  // insertion sort the arrays
+  for ( k = 1 ; k < samplesNumToAverage; k++){
+    j = k;
+    while (j > 0 && sortedValues[j-1] > sortedValues[j]) {
+      temp = sortedValues[j-1];
+      sortedValues[j-1] = sortedValues[j];
+      sortedValues[j] = temp;
+      j -= 1;
+    }
+  }
+  for ( j = 0; j < samplesNumToAverage; j++){
+    Serial.print(sortedValues[j]);
+    Serial.print(" : ");
+  }
+  Serial.println("");
+// throw out the top x% and bottom x% of samples but limit to throw out at least one
+  bottom = max(((samplesNumToAverage *15) / 100), 1);
+  top = min((((samplesNumToAverage * 85) / 100) + 1), samplesNumToAverage - 1);
+  k = 0;
+  total = 0;
+  for ( j = bottom ; j < top ; j++ ){
+    total += sortedValues[j];
+    k++;
+  }
+  return (unsigned int) (( total / k ) - offset);
+}
