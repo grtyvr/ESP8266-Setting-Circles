@@ -21,6 +21,9 @@
  Added better code to calculate a running average with throwing out the high and low 15% of values
  Added a structure to hold the two sensor readings 
  
+ July 15, 2015
+ Refactored to make functions for the AS5048A calls (in progress)
+ 
  */
 
 #include <SPI.h>
@@ -46,12 +49,20 @@ int status = WL_IDLE_STATUS;
 // for example...
 // http://ams.com/eng/Support/Demoboards/Position-Sensors/Rotary-Magnetic-Position-Sensors/AS5048A-Adapterboard  
 
-#define AS5048_CMD_READ 0x4000    
-#define AS5048_REG_AGC 0x3FFD
-#define AS5048_REG_MAG 0x3FFE
-#define AS5048_REG_DATA 0x3FFF
-#define AS5048_REG_ERR 0x1
-#define AS5048_CMD_NOP 0x0
+#define AS5048_CMD_READ 0x4000  // flag indicating read attement
+#define AS5048_CMD_WRITE 0x8000 // flag indicating write attemept
+#define AS5048_REG_AGC 0x3FFD   // agc and diagnostics register ( 0 = high, 255 = low)
+                                // bit 0 to 7 are agc
+                                // bit 8 = 1 Offset Compensation Finished
+                                // bit 9 = 0 Cordic OverFlow  (output keeps last valid value
+                                // bit 10 = 1 low magnetic field
+                                // bit 11 = 1 high magnetic field
+#define AS5048_REG_MAG 0x3FFE   // magnitude information after ATAN calculation
+#define AS5048_REG_DATA 0x3FFF  // angle data
+#define AS5048_REG_ERR 0x1      // error register bit 0 = framing error, bit 1 = invalid command, bit 2 = parity error
+#define AS5048_CMD_NOP 0x0      // dummy operation
+#define AS5048_NUM_SENSORS 2    // number of sensors in daisy chain
+
 
 // for smoothing sensor data
 #define samplesNumToAverage  20
@@ -71,6 +82,17 @@ unsigned int data = 0;
 word smoothAzimuthData = 0;
 word smoothAltitudeData = 0;
 unsigned int value = 0;
+unsigned int altRawData[3];
+unsigned int aztRawData[3];
+byte altAGC;
+bute aztAGC;
+unsigned int magnitude;
+byte altOCF;
+byte aztCOF;
+byte altAlarmHigh;
+byte altAlarmLow;
+byte aztAlarmHigh;
+byte aztAlarmLow;
 float angle = 0;
 int i = 0;
 int del = 10;
@@ -236,7 +258,7 @@ float Angle(String axis) {
   command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
   command |= calcEvenParity(command) <<15;          // or with the parity of the command
   cmd_highbyte = highByte(command);                 // split it into high and low byte
-  cmd_lowbyte = lowByte(command);                   //
+  cmd_lowbyte = lowByte(command);                   // 
   digitalWrite(ssl,LOW);                            // select the chip
   alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
   alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
@@ -249,7 +271,7 @@ float Angle(String axis) {
     alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
     alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
     azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // read high and low
     digitalWrite(ssl,HIGH);                         // close the chip
     if (axis ==  "Altitude") {
       data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
@@ -293,7 +315,7 @@ unsigned int Tic(String axis) {
     alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
     alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
     azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   //
+    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // 
     digitalWrite(ssl,HIGH);                         // close the chip
 
     if (axis ==  "Altitude") {
@@ -364,6 +386,91 @@ void printWifiStatus() {
   Serial.print("signal strength (RSSI):");
   Serial.print(rssi);
   Serial.println(" dBm");
+}
+
+/*
+ AS5048 Functions:
+ */
+ 
+ // send a two byte command to two daisy chained AS5048As
+ // we use pointers to the unsigned int's that we want to hold the returned data in
+void sendAS5048_two(unsigned int cmd,unsigned int &d1, unsigned int &d2){
+ cmd_highbyte = highByte(cmd);                     // split the command into high and low bytes
+ cmd_lowbyte = lowByte(cmd);
+ digitalWrite(ssl, LOW);                           // take the slave select LOW to issue a command
+ alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+ alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
+ azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
+ azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
+ digitalWrite(ssl,HIGH);                           // close the bus by taking slave select HIGH
+ d1 = alt_data_highbyte;                      // reconstruct our data into unsigned int
+ d1 = d1 << 8;
+ d1 |= alt_data_lowbyte;
+ d2 = azt_data_highbyte;
+ d2 = d2 << 8;
+ d2 |= azt_data_lowbyte;
+}
+
+int readAGC(byte &altAGC, &aztAGC){
+ // try to read the AGC.
+ // retruns -1 if there was an error reading either axis
+  command = AS5048_CMD_READ | AS5048_REG_AGC;       // read data register
+  command |= calcEvenParity(command) <<15;          // or with the parity of the command
+  sendAS5048_two(command, altData, aztData);
+  command = AS5048_CMD_NOP;
+  sendAS5048_two(command, altData, aztData);
+  if ((altData & 0x4000) || (aztData & 0x4000)) {
+   // error flag for one of the axis.  need to reset it
+   Serial.println("Error reading AGC");
+   sendAS5048_two((SPI_CMD_READ | SPI_REG_CLRERR), altData, aztData);
+   return -1;
+  } else {
+   altAGC = lowByte(altData);
+   aztAGC = lowByte(aztData);
+   return 0;
+  }
+}
+
+int readData(unsigned int altRawData[], unsigned int aztRawData[] ){
+ unsigned int lData;
+ unsigned int zData;
+ unsigned int lAGC;
+ unsigned int zAGC;
+ unsigned int lMag;
+ unsigned int zMag;
+ // send the READ_AGC command.  The received data is thrown away
+  command = AS5048_CMD_READ | AS5048_REG_AGC;       // read data register
+  command |= calcEvenParity(command) <<15;          // or with the parity of the command
+  sendAS5048_two(command, lData, zData);
+  // send the READ_MAG command.  the received data is the AGC data
+  command = AS5048_CMD_READ | AS5048_REG_MAG;       // read data register
+  command |= calcEvenParity(command) <<15;          // or with the parity of the command
+  sendAS5048_two(command, lData, zData);
+  lAGC = lData;
+  zAGC = zData;
+  // send the READ ANGLE command.  the received data is the magnitude 
+  command = AS5048_CMD_READ | AS5048_REG_DATA
+  command |= calcEvenParity(command) <<15;
+  sendAS5048_two(command, lData, zData);
+  lMag = lData;
+  zMag = zData;
+  // send the NOP command. the received data is the angle
+  command = AS5048_CMD_NOP;
+  sendAS5048_two(command, lData, zData);
+  if ((lData & 0x4000) || (zData & 0x4000) || (lMag & 0x4000) || (zMag & 0x4000) || (lAGC & 0x4000) || (zAGC & 0x4000) ) {
+   // error flag for one of the axis.  need to reset it
+   Serial.println("Error reading");
+   sendAS5048_two((SPI_CMD_READ | SPI_REG_CLRERR), altData, aztData);
+   return -1;
+  } else {
+   altRawData[0] = lAGC;
+   altRawData[1] = lMag;
+   altRawData[2] = lData;
+   aztRawData[0] = zAGC;
+   aztRawData[1] = zMag;
+   aztRawData[2] = zData;
+   return 0;
+  }
 }
 
 // this function takes a rawSensorData reading, inserts the value into the 'oldest' slot
