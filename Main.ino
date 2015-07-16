@@ -82,8 +82,8 @@ unsigned int data = 0;
 word smoothAzimuthData = 0;
 word smoothAltitudeData = 0;
 unsigned int value = 0;
-unsigned int altRawData[3];
-unsigned int aztRawData[3];
+unsigned int altRawData[5];
+unsigned int aztRawData[5];
 byte altAGC;
 bute aztAGC;
 unsigned int magnitude;
@@ -393,6 +393,7 @@ void printWifiStatus() {
  */
  
  // send a two byte command to two daisy chained AS5048As
+ // we need to be able to read back two unsigned int's
  // we use pointers to the unsigned int's that we want to hold the returned data in
 void sendAS5048_two(unsigned int cmd,unsigned int &d1, unsigned int &d2){
  cmd_highbyte = highByte(cmd);                     // split the command into high and low bytes
@@ -411,7 +412,7 @@ void sendAS5048_two(unsigned int cmd,unsigned int &d1, unsigned int &d2){
  d2 |= azt_data_lowbyte;
 }
 
-int readAGC(byte &altAGC, &aztAGC){
+int readAGC(byte &altAGC, byte &aztAGC){
  // try to read the AGC.
  // retruns -1 if there was an error reading either axis
   command = AS5048_CMD_READ | AS5048_REG_AGC;       // read data register
@@ -431,6 +432,7 @@ int readAGC(byte &altAGC, &aztAGC){
   }
 }
 
+// read data from the Sensors.  We assume that it is two daisy chained.
 int readData(unsigned int altRawData[], unsigned int aztRawData[] ){
  unsigned int lData;
  unsigned int zData;
@@ -463,12 +465,16 @@ int readData(unsigned int altRawData[], unsigned int aztRawData[] ){
    sendAS5048_two((SPI_CMD_READ | SPI_REG_CLRERR), altData, aztData);
    return -1;
   } else {
-   altRawData[0] = lAGC;
-   altRawData[1] = lMag;
-   altRawData[2] = lData;
-   aztRawData[0] = zAGC;
-   aztRawData[1] = zMag;
-   aztRawData[2] = zData;
+   altRawData[0] = lAGC & 0xFF;    // Automatic Gain Controll
+   altRawData[1] = lMag & 0x3FFF;  // Magnitude
+   altRawData[2] = lData & 0x3FFF; // Angle
+   altRawData[3] = lAGC & 0x400;   // High Magnetic Field
+   altRawData[4] = lAGC & 0x200;   // Low Magnetic Field
+   aztRawData[0] = zAGC & 0xFF;
+   aztRawData[1] = zMag & 0x3FFF;
+   aztRawData[2] = zData & 0x3FFF;
+   aztRawData[3] = zAGC & 0x400;
+   aztRawData[3] = zAGC & 0x200;
    return 0;
   }
 }
