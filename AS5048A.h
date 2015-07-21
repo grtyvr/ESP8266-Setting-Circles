@@ -33,8 +33,12 @@ class AS5048A{
 public:
   bool errorFlag;
   byte cs;
-  void sendTwoDaisychain(unsigned int cmd, unsigned int &d1, unsigned int &d2);
+  String PadTic(unsigned int tic);
+  unsigned int Tic(String axis);
+  int readData(unsigned int Data[])
 private:
   byte _cs;
+  void _sendOne(unsigned int cmd, int ssl, unsigned int &d1);
+  void _sendTwoDaisychain(unsigned int cmd, unsigned int &d1, unsigned int &d2);
   byte _calc_even_parity(unsigned int data);
 };
