@@ -1,3 +1,17 @@
+/* AS5048A.cpp
+ * AS5048A.h Library for interacting with AS5048 magnetic angular position Sensors.
+ * Guy R. Thomas July 21, 2015.
+ * Released under the MIT licesnce.
+ */
+
+#include "Arduino.h"
+#include "AS5048A.h"
+
+AS5048A::AS5048A(int cs){
+  pinMode(cs, OUTPUT);
+  _cs = cs;
+}
+
 // Calculate Even parity of word
 byte _calc_even_parity(unsigned int value) {
   byte count = 0;
@@ -22,7 +36,7 @@ AS5048 Functions:
 // send a two byte command to two daisy chained AS5048As
 // we need to be able to read back two unsigned int's
 // we use pointers to the unsigned int's that we want to hold the returned data in
-void sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int &d2){
+void AS5048A::sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int &d2){
   cmd_highbyte = highByte(cmd); // split the command into high and low bytes
   cmd_lowbyte = lowByte(cmd);
   digitalWrite(ssl1, LOW); // take the slave select LOW to issue a command
@@ -42,7 +56,7 @@ void sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int &d2){
 // send a two byte command to a suingle AS5048As
 // we need to be able to read back two unsigned int's
 // we use pointers to the unsigned int's that we want to hold the returned data in
-void sendAS5048_one(unsigned int cmd, int ssl, unsigned int &d1){
+void AS5048A::sendAS5048_one(unsigned int cmd, int ssl, unsigned int &d1){
   unsigned int data_highbyte;
   unsigned int data_lowbyte;
   cmd_highbyte = highByte(cmd); // split the command into high and low bytes
@@ -57,7 +71,7 @@ void sendAS5048_one(unsigned int cmd, int ssl, unsigned int &d1){
 }
 
 // read data from the Sensors. We assume that it is two daisy chained.
-int readData(unsigned int Data[]){
+int AS5048A::readData(unsigned int Data[]){
   unsigned int rawData;
   unsigned int rawAGC;
   unsigned int rawMag;
@@ -141,7 +155,7 @@ float Angle(String axis) {
   return AverageAngle;
 }
 */
-unsigned int Tic(String axis) {
+unsigned int AS5048A::Tic(String axis) {
   // take an axis and read that sensor to get the raw encoder value
   unsigned int tics[samplesNumToAverage];
   unsigned int tic;
@@ -185,7 +199,7 @@ unsigned int Tic(String axis) {
 }
 
 // pad the Tics value with leading zeros and return a string
-String PadTic(unsigned int tic){
+String AS5048A::PadTic(unsigned int tic){
   String paddedTic;
   if (tic < 10)
     paddedTic = "+0000" + String(tic);
