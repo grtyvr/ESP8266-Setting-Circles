@@ -3,6 +3,7 @@
  * Guy R. Thomas July 21, 2015.
  * Released under the MIT licesnce.
  */
+ 
 #ifndef AS5048_h
 #define AS5048_h
 #define LIBRARY_VERION 0.1
@@ -29,16 +30,18 @@
  *
  */
 
-class AS5048A{
-public:
-  bool errorFlag;
-  byte cs;
-  String PadTic(unsigned int tic);
-  unsigned int Tic(String axis);
-  int readData(unsigned int Data[])
-private:
-  byte _cs;
-  void _sendOne(unsigned int cmd, int ssl, unsigned int &d1);
-  void _sendTwoDaisychain(unsigned int cmd, unsigned int &d1, unsigned int &d2);
-  byte _calc_even_parity(unsigned int data);
+class AS5048A
+{
+  public:
+    AS5048A(int cs);
+    String PadTic(unsigned int tic);
+//    unsigned int Tic(String axis);
+    int readData(unsigned int Data[]);
+  private:
+    int _cs;
+    void _sendOne(unsigned int cmd, int _cs, unsigned int &d1);
+    void _sendTwoDaisychain(unsigned int cmd, unsigned int &d1, unsigned int &d2);
+    int _calcEvenParity(unsigned int data);
 };
+
+#endif
