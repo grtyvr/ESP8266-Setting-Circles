@@ -36,15 +36,21 @@ AS5048 Functions:
 // send a two byte command to two daisy chained AS5048As
 // we need to be able to read back two unsigned int's
 // we use pointers to the unsigned int's that we want to hold the returned data in
-void AS5048A::sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int &d2){
+void AS5048A::_sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int &d2){
+  int cmd_highbyte;
+  int cmd_lowbyte;
+  word alt_data_highbyte;
+  word alt_data_lowbyte;
+  word azt_data_highbyte;
+  word azt_data_lowbyte;
   cmd_highbyte = highByte(cmd); // split the command into high and low bytes
   cmd_lowbyte = lowByte(cmd);
-  digitalWrite(ssl1, LOW); // take the slave select LOW to issue a command
+  digitalWrite(_cs, LOW); // take the slave select LOW to issue a command
   alt_data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
   alt_data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
   azt_data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
   azt_data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
-  digitalWrite(ssl1,HIGH); // close the bus by taking slave select HIGH
+  digitalWrite(_cs,HIGH); // close the bus by taking slave select HIGH
   d1 = alt_data_highbyte; // reconstruct our data into unsigned int
   d1 = d1 << 8;
   d1 |= alt_data_lowbyte;
@@ -56,52 +62,55 @@ void AS5048A::sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int 
 // send a two byte command to a suingle AS5048As
 // we need to be able to read back two unsigned int's
 // we use pointers to the unsigned int's that we want to hold the returned data in
-void AS5048A::sendAS5048_one(unsigned int cmd, int ssl, unsigned int &d1){
+void AS5048A::_sendOne(unsigned int cmd, int _cs, unsigned int &d1){
+  int cmd_highbyte;
+  int cmd_lowbyte;
   unsigned int data_highbyte;
   unsigned int data_lowbyte;
   cmd_highbyte = highByte(cmd); // split the command into high and low bytes
   cmd_lowbyte = lowByte(cmd);
-  digitalWrite(ssl, LOW); // take the slave select LOW to issue a command
+  digitalWrite(_cs, LOW); // take the slave select LOW to issue a command
   data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
   data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
-  digitalWrite(ssl,HIGH); // close the bus by taking slave select HIGH
-  d1 = alt_data_highbyte; // reconstruct our data into unsigned int
+  digitalWrite(_cs,HIGH); // close the bus by taking slave select HIGH
+  d1 = data_highbyte; // reconstruct our data into unsigned int
   d1 = d1 << 8;
-  d1 |= alt_data_lowbyte;
+  d1 |= data_lowbyte;
 }
 
 // read data from the Sensors. We assume that it is two daisy chained.
 int AS5048A::readData(unsigned int Data[]){
+  word command;
   unsigned int rawData;
   unsigned int rawAGC;
   unsigned int rawMag;
   // send the READ_AGC command. The received data is thrown away
   command = AS5048_CMD_READ | AS5048_REG_AGC; // read data register
-  command |= calcEvenParity(command) <<15; // or with the parity of the command
-  sendAS5048_one(command, ssl1, rawData);
+  command |= _calcEvenParity(command) <<15; // or with the parity of the command
+  _sendOne(command, _cs, rawData);
   // send the READ_MAG command. the received data is the AGC data
   command = AS5048_CMD_READ | AS5048_REG_MAG; // read data register
-  command |= calcEvenParity(command) <<15; // or with the parity of the command
-  sendAS5048_one(command, ssl1, rawData);
+  command |= _calcEvenParity(command) <<15; // or with the parity of the command
+  _sendOne(command, _cs, rawData);
   rawAGC = rawData;
   Serial.print("AGC: ");
   Serial.print(rawData,BIN);
   // send the READ ANGLE command. the received data is the magnitude
   command = AS5048_CMD_READ | AS5048_REG_DATA;
-  command |= calcEvenParity(command) <<15;
-  sendAS5048_one(command, ssl1, rawData);
+  command |= _calcEvenParity(command) <<15;
+  _sendOne(command, _cs, rawData);
   rawMag = rawData;
   Serial.print(" MAG: ");
   Serial.print(rawData,BIN);
   // send the NOP command. the received data is the angle
   command = AS5048_CMD_NOP;
-  sendAS5048_one(command, ssl1, rawData);
+  _sendOne(command, _cs, rawData);
   Serial.print(" DAT: ");
   Serial.println(rawData,BIN);
   if ((rawData & 0x4000) || (rawMag & 0x4000) || (rawAGC & 0x4000)) {
     // error flag for one of the axis. need to reset it
     Serial.println("Error reading");
-    sendAS5048_one((AS5048_CMD_READ | AS5048_REG_ERR), ssl1, rawData);
+    _sendOne((AS5048_CMD_READ | AS5048_REG_ERR), _cs, rawData);
     return -1;
   } else {
     Data[0] = rawAGC & 0xFF; // Automatic Gain Controll
@@ -154,7 +163,7 @@ float Angle(String axis) {
   AverageAngle = AverageAngle / samplesNumToAverage;
   return AverageAngle;
 }
-*/
+
 unsigned int AS5048A::Tic(String axis) {
   // take an axis and read that sensor to get the raw encoder value
   unsigned int tics[samplesNumToAverage];
@@ -197,7 +206,7 @@ unsigned int AS5048A::Tic(String axis) {
   averageTic = averageTic / samplesNumToAverage;
   return averageTic;
 }
-
+*/
 // pad the Tics value with leading zeros and return a string
 String AS5048A::PadTic(unsigned int tic){
   String paddedTic;
