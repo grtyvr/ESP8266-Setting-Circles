@@ -28,8 +28,6 @@ byte _calEvenParity(unsigned int value) {
   // all odd binaries end in 1
   return count & 0x1;
 }
-
-
 /*
 AS5048 Functions:
 */
@@ -60,8 +58,7 @@ void AS5048A::_sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int
 }
 
 // send a two byte command to a suingle AS5048As
-// we need to be able to read back two unsigned int's
-// we use pointers to the unsigned int's that we want to hold the returned data in
+// we use pointers to the unsigned int that we want to hold the returned data in
 void AS5048A::_sendOne(unsigned int cmd, int _cs, unsigned int &d1){
   int cmd_highbyte;
   int cmd_lowbyte;
@@ -78,7 +75,7 @@ void AS5048A::_sendOne(unsigned int cmd, int _cs, unsigned int &d1){
   d1 |= data_lowbyte;
 }
 
-// read data from the Sensors. We assume that it is two daisy chained.
+// read data from the Sensor
 int AS5048A::readData(unsigned int Data[]){
   word command;
   unsigned int rawData;
