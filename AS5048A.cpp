@@ -13,7 +13,7 @@ AS5048A::AS5048A(int cs){
 }
 
 // Calculate Even parity of word
-byte _calc_even_parity(unsigned int value) {
+byte _calEvenParity(unsigned int value) {
   byte count = 0;
   byte i;
   // loop through the 16 bits
@@ -120,105 +120,4 @@ int AS5048A::readData(unsigned int Data[]){
     Data[4] = rawAGC & 0x200; // Low Magnetic Field
     return 0;
   }
-}
-/*
-float Angle(String axis) {
-  // take an axis and read that sensor to get the angle
-  float angles[samplesNumToAverage];
-  float angle;
-  float AverageAngle = 0;
-  int myCounter = 0;
-  command = AS5048_CMD_READ | AS5048_REG_DATA; // read data register
-  command |= calcEvenParity(command) <<15; // or with the parity of the command
-  cmd_highbyte = highByte(command); // split it into high and low byte
-  cmd_lowbyte = lowByte(command); //
-  digitalWrite(ssl1,LOW); // select the chip
-  alt_data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
-  azt_data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
-  digitalWrite(ssl1,HIGH); // but throw those two away as we don't know what the previous command was
-  for (myCounter = 0; myCounter <samplesNumToAverage; myCounter++ ){
-    digitalWrite(ssl1,LOW);
-    alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte
-    alt_data_lowbyte = SPI.transfer(cmd_lowbyte); // and read high and low byte for altitude
-    azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte); // read high and low
-    digitalWrite(ssl1,HIGH); // close the chip
-    if (axis == "Altitude") {
-      data = alt_data_highbyte; // Store the high byte in my 16 bit varriable
-      data = data << 8; // shift left 8 bits
-      data = data | alt_data_lowbyte; // tack on the low byte
-    } else {
-      data = azt_data_highbyte;
-      data = data << 8;
-      data = data | azt_data_lowbyte;
-    }
-    value = data & 0x3FFF; // mask off the top two bits
-    angles[myCounter] = (float(value)/16383)*360; // calculate the angle that represents
-  }
-  for (myCounter = 0; myCounter < samplesNumToAverage; myCounter++){
-    AverageAngle = AverageAngle + angles[myCounter];
-  }
-  AverageAngle = AverageAngle / samplesNumToAverage;
-  return AverageAngle;
-}
-
-unsigned int AS5048A::Tic(String axis) {
-  // take an axis and read that sensor to get the raw encoder value
-  unsigned int tics[samplesNumToAverage];
-  unsigned int tic;
-  float averageTic = 0;
-  int myCounter = 0;
-  command = AS5048_CMD_READ | AS5048_REG_DATA; // read data register
-  command |= calcEvenParity(command) <<15; // or with the parity of the command
-  cmd_highbyte = highByte(command); // split it into high and low byte
-  cmd_lowbyte = lowByte(command); //
-  digitalWrite(ssl1,LOW); // select the chip
-  alt_data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
-  azt_data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
-  digitalWrite(ssl1,HIGH); // but throw those two away as we don't know what the previous command was
-  for (myCounter = 0; myCounter < samplesNumToAverage; myCounter++ ){
-    digitalWrite(ssl1,LOW);
-    alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte
-    alt_data_lowbyte = SPI.transfer(cmd_lowbyte); // and read high and low byte for altitude
-    azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte); //
-    digitalWrite(ssl1,HIGH); // close the chip
-    if (axis == "Altitude") {
-      data = alt_data_highbyte; // Store the high byte in my 16 bit varriable
-      data = data << 8; // shift left 8 bits
-      data = data | alt_data_lowbyte; // tack on the low byte
-    } else {
-      data = azt_data_highbyte;
-      data = data << 8;
-      data = data | azt_data_lowbyte;
-    }
-    value = data & 0x3FFF; // mask off the top two bits
-    tics[myCounter] = (value); // calculate the angle that represents
-  }
-
-  for (myCounter = 0; myCounter < samplesNumToAverage; myCounter++){
-    averageTic = averageTic + tics[myCounter];
-  }
-  averageTic = averageTic / samplesNumToAverage;
-  return averageTic;
-}
-*/
-// pad the Tics value with leading zeros and return a string
-String AS5048A::PadTic(unsigned int tic){
-  String paddedTic;
-  if (tic < 10)
-    paddedTic = "+0000" + String(tic);
-  else if ( tic < 100 )
-    paddedTic = "+000" + String(tic);
-  else if ( tic < 1000 )
-    paddedTic = "+00" + String(tic);
-  else if ( tic < 10000 )
-    paddedTic = "+0" + String(tic);
-  else if ( tic < 100000 )
-    paddedTic = "+" + String(tic);
-  return paddedTic;
 }
