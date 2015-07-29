@@ -49,35 +49,39 @@ int status = WL_IDLE_STATUS;
 unsigned int smoothAzimuthValue[samplesNumToAverage];
 unsigned int smoothAltitudeValue[samplesNumToAverage];
 
-int ssl1=15;
-int ssl2=16;
-byte cmd_highbyte = 0;
-byte cmd_lowbyte = 0;
-byte alt_data_highbyte = 0;
-byte alt_data_lowbyte = 0;
-byte azt_data_highbyte = 0;
-byte azt_data_lowbyte = 0;
-word command = 0;
-unsigned int data = 0;
-word smoothAzimuthData = 0;
-word smoothAltitudeData = 0;
-unsigned int value = 0;
+//int ssl1=15;
+//int ssl2=16;
+//byte cmd_highbyte = 0;
+//byte cmd_lowbyte = 0;
+//byte alt_data_highbyte = 0;
+//byte alt_data_lowbyte = 0;
+//byte azt_data_highbyte = 0;
+//byte azt_data_lowbyte = 0;
+//word command = 0;
+//unsigned int data = 0;
+unsigned int smoothAzimuthData = 0;
+//word smoothAltitudeData = 0;
+//unsigned int value = 0;
+
+//byte altAGC;
+//byte aztAGC;
+//unsigned int magnitude;
+//byte altOCF;
+//byte aztCOF;
+//byte altAlarmHigh;
+//byte altAlarmLow;
+//byte aztAlarmHigh;
+//byte aztAlarmLow;
+//float angle = 0;
+//int i = 0;
+//int del = 10;
 unsigned int Data[5];
-byte altAGC;
-byte aztAGC;
-unsigned int magnitude;
-byte altOCF;
-byte aztCOF;
-byte altAlarmHigh;
-byte altAlarmLow;
-byte aztAlarmHigh;
-byte aztAlarmLow;
-float angle = 0;
-int i = 0;
-int del = 10;
-int readError=0;
+int readError = -1;
 
 WiFiServer server(23);
+
+// set up an instance of our sensor object
+AS5048A azimuthSensor(15);
 
 boolean alreadyConnected = false; // whether or not the client was connected previously
 
@@ -110,50 +114,19 @@ server.begin();
   printWifiStatus();
 #endif
 
-// Set up the SPI buss
-pinMode(ssl1, OUTPUT);
-pinMode(ssl2, OUTPUT);
-SPI.begin(); // Wake up the bus
-SPI.setBitOrder(MSBFIRST);                                      // AS5048 is a Most Significant Bit first
-SPI.setDataMode(SPI_MODE1);                                     // AS5048 uses Mode 1
-command = AS5048_CMD_READ | AS5048_REG_DATA;                    // Set up the command we will send
-command |= calcEvenParity(command) <<15;                        // assign the parity bit
-cmd_highbyte = highByte(command);                               // split it into bytes
-cmd_lowbyte = lowByte(command); 
-                                                                // initialize our smoothing array with data
-                                                                // first time has dummy data
-digitalWrite(ssl1, LOW);                                         // Drop ssl to enable the AS5048's
-alt_data_highbyte = SPI.transfer(cmd_highbyte);                 // send the initial read command
-alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-azt_data_highbyte = SPI.transfer(cmd_highbyte);                 // send the second read command
-azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-digitalWrite(ssl1, HIGH);                                        // disable the AS5048's
+// initialize and read the sensor till we get a good reading
+// we can expand on this later to fill up our smoothing array
 
-for ( i = 0; i <= samplesNumToAverage + 1; i++ ) {
-  digitalWrite(ssl1, LOW);                                       // Drop ssl to enable the AS5048's
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);               // send the initial read command
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);               // send the second read command
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  digitalWrite(ssl1, HIGH);                                      // disable the AS5048's
-  data = azt_data_highbyte;
-  data = data << 8;
-  data = data | azt_data_lowbyte;
-  value = data & 0x3FFF;                                        // mask off the top two bits
-  smoothAzimuthData = digitalSmooth(data, smoothAzimuthValue);
-  data = alt_data_highbyte;
-  data = data << 8;
-  data = data | alt_data_lowbyte;
-  value = data & 0x3FFF;                                        // mask off the top two bits
-  smoothAltitudeData = digitalSmooth(data, smoothAltitudeValue);
-  }
+while (readError != -1){
+  readError = azimuthSensor.readAngle(Data)
+}
 } // end setup
 
 void loop() {
   // Get new sensor readings each time we loop.
   
   Serial.println("Reading Sensors");
-  readError = readData(Data);
+  readError = azimuthSensor.readData(Data);
   if (readError == -1 ) {
     Serial.println("Error on read");
   } else {
@@ -176,36 +149,10 @@ void loop() {
   }
   
   delay(1000);
-/*  
-  command = AS5048_CMD_READ | AS5048_REG_DATA;                    // read data register
-  command |= calcEvenParity(command) <<15;                        // or with the parity of the command
-  cmd_highbyte = highByte(command);                               // split it into high and low byte
-  cmd_lowbyte = lowByte(command);                                 
-  digitalWrite(ssl1,LOW);                                          // select the chip
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);                 // send a read command, and store the return value of the previous command in data
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);                   // rest of the read command
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);                 // send a read command, and store the return value of the previous command in data
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);                   // rest of the read command
-  digitalWrite(ssl1,HIGH);                                         // but throw those two away as we don't know what the previous command was
-  digitalWrite(ssl1,LOW);                                          // select the chip
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);                 // send a read command, and store the return value of the previous command in data
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);                   // rest of the read command
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);                 // send a read command, and store the return value of the previous command in data
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);                   // rest of the read command
-  digitalWrite(ssl1,HIGH);
-  data = azt_data_highbyte;
-  data = data << 8;
-  data = data | azt_data_lowbyte;
-  value = data & 0x3FFF;                                          // mask off the top two bits
-*/
+
   smoothAzimuthData = digitalSmooth(Data[2], smoothAzimuthValue);
   Serial.print("Smooth Azimuth: ");
   Serial.println(smoothAzimuthData);
-  data = alt_data_highbyte;
-  data = data << 8;
-  data = data | alt_data_lowbyte;
-  value = data & 0x3FFF;                                          // mask off the top two bits
-  smoothAltitudeData = digitalSmooth(Data[2], smoothAltitudeValue);
 
   // wait for a new client:
   // Serial.print(".");
@@ -224,22 +171,12 @@ void loop() {
        Serial.print(thisClient.available());
        Serial.println(" characters to be read");
         // lets print a response and discard the rest of the bytes
-        thisClient.print(PadTic(Tic("Azimuth")));
-        thisClient.print("\t");
-        thisClient.print(PadTic(Tic("Altitude")));
-        thisClient.print("\r\n");
-        Serial.print("Azimuth Angle: ");
-//        Serial.print(Angle("Azimuth"));
-        Serial.print(" Altituge Angle: ");
-//        Serial.println(Angle("Altitude"));
+        thisClient.print(PadTic(smoothAzimuthData));
+        thisClient.print("\t000000\r\n");
         Serial.print("Azimuth tic: ");
-        Serial.print(PadTic(Tic("Azimuth")));
+        Serial.print(PadTic(smoothAzimuthData));
         Serial.print(" Altitude tic: ");
-        Serial.println(PadTic(Tic("Altitude")));
-        Serial.print("Smoothed Azimuth Value: ");
-        Serial.print(smoothAzimuthData);
-        Serial.print(" Smoothed Altitude Value: ");
-        Serial.println(smoothAltitudeData);
+        Serial.println("000000");
        // discard remaining bytes
        thisClient.flush();
       }
@@ -267,6 +204,21 @@ void printWifiStatus() {
   Serial.println(" dBm");
 }
 
+// pad the Tics value with leading zeros and return a string
+String PadTic(unsigned int tic){
+  String paddedTic;
+  if (tic < 10)
+    paddedTic = "+0000" + String(tic);
+  else if ( tic < 100 )
+    paddedTic = "+000" + String(tic);
+  else if ( tic < 1000 )
+    paddedTic = "+00" + String(tic);
+  else if ( tic < 10000 )
+    paddedTic = "+0" + String(tic);
+  else if ( tic < 100000 )
+    paddedTic = "+" + String(tic);
+  return paddedTic;
+}
 // this function takes a rawSensorData reading, inserts the value into the 'oldest' slot
 // transfer the data into a pair of intermediate arrays used for sorting the values
 // inserts the value into the respective sorted arrays according to the following
