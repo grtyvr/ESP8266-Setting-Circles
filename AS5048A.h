@@ -34,8 +34,6 @@ class AS5048A
 {
   public:
     AS5048A(int cs);
-    String PadTic(unsigned int tic);
-//    unsigned int Tic(String axis);
     int readData(unsigned int Data[]);
   private:
     int _cs;
