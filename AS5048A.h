@@ -39,7 +39,7 @@ class AS5048A
     int _cs;
     void _sendOne(unsigned int cmd, int _cs, unsigned int &d1);
     void _sendTwoDaisychain(unsigned int cmd, unsigned int &d1, unsigned int &d2);
-    int _calcEvenParity(unsigned int data);
+    unsigned int _calcEvenParity(unsigned int data);
 };
 
 #endif
