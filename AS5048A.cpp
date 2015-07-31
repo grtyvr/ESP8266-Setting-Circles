@@ -4,18 +4,18 @@
  * Released under the MIT licesnce.
  */
 
-#include "Arduino.h"
-#include "AS5048A.h"
+#include <Arduino.h>
+#include <AS5048A.h>
 
-AS5048A::AS5048A(int cs){
+AS5048A::AS5048A(int cs) {
   pinMode(cs, OUTPUT);
   _cs = cs;
 }
 
 // Calculate Even parity of word
-byte _calEvenParity(unsigned int value) {
-  byte count = 0;
-  byte i;
+unsigned int AS5048A::_calcEvenParity(unsigned int value) {
+  int count = 0;
+  int i;
   // loop through the 16 bits
   for (i = 0; i < 16; i++) {
     // if the rightmost bit is 1 increment our counter
@@ -24,10 +24,29 @@ byte _calEvenParity(unsigned int value) {
       }
       // shift off the rightmost bit
       value >>=1;
-   }
+  }
   // all odd binaries end in 1
   return count & 0x1;
 }
+
+// send a two byte command to a single AS5048A
+// we use pointers to the unsigned int that we want to hold the returned data in
+void AS5048A::_sendOne(unsigned int cmd, int _cs, unsigned int &d1){
+  int cmd_highbyte;
+  int cmd_lowbyte;
+  unsigned int data_highbyte;
+  unsigned int data_lowbyte;
+  cmd_highbyte = highByte(cmd); // split the command into high and low bytes
+  cmd_lowbyte = lowByte(cmd);
+  digitalWrite(_cs, LOW); // take the slave select LOW to issue a command
+  data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
+  data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
+  digitalWrite(_cs,HIGH); // close the bus by taking slave select HIGH
+  d1 = data_highbyte; // reconstruct our data into unsigned int
+  d1 = d1 << 8;
+  d1 |= data_lowbyte;
+}
+
 /*
 AS5048 Functions:
 */
@@ -55,24 +74,6 @@ void AS5048A::_sendTwoDaisychain(unsigned int cmd,unsigned int &d1, unsigned int
   d2 = azt_data_highbyte;
   d2 = d2 << 8;
   d2 |= azt_data_lowbyte;
-}
-
-// send a two byte command to a suingle AS5048As
-// we use pointers to the unsigned int that we want to hold the returned data in
-void AS5048A::_sendOne(unsigned int cmd, int _cs, unsigned int &d1){
-  int cmd_highbyte;
-  int cmd_lowbyte;
-  unsigned int data_highbyte;
-  unsigned int data_lowbyte;
-  cmd_highbyte = highByte(cmd); // split the command into high and low bytes
-  cmd_lowbyte = lowByte(cmd);
-  digitalWrite(_cs, LOW); // take the slave select LOW to issue a command
-  data_highbyte = SPI.transfer(cmd_highbyte); // send a read command, and store the return value of the previous command in data
-  data_lowbyte = SPI.transfer(cmd_lowbyte); // rest of the read command
-  digitalWrite(_cs,HIGH); // close the bus by taking slave select HIGH
-  d1 = data_highbyte; // reconstruct our data into unsigned int
-  d1 = d1 << 8;
-  d1 |= data_lowbyte;
 }
 
 // read data from the Sensor
@@ -104,17 +105,17 @@ int AS5048A::readData(unsigned int Data[]){
   _sendOne(command, _cs, rawData);
   Serial.print(" DAT: ");
   Serial.println(rawData,BIN);
-  if ((rawData & 0x4000) || (rawMag & 0x4000) || (rawAGC & 0x4000)) {
+ // if ((rawData & 0x4000) || (rawMag & 0x4000) || (rawAGC & 0x4000)) {
     // error flag for one of the axis. need to reset it
-    Serial.println("Error reading");
-    _sendOne((AS5048_CMD_READ | AS5048_REG_ERR), _cs, rawData);
-    return -1;
-  } else {
+ //   Serial.println("Error reading");
+ //   _sendOne((AS5048_CMD_READ | AS5048_REG_ERR), _cs, rawData);
+ //   return -1;
+ // } else {
     Data[0] = rawAGC & 0xFF; // Automatic Gain Controll
     Data[1] = rawMag & 0x3FFF; // Magnitude
     Data[2] = rawData & 0x3FFF; // Angle
     Data[3] = rawAGC & 0x400; // High Magnetic Field
     Data[4] = rawAGC & 0x200; // Low Magnetic Field
     return 0;
-  }
+ // }
 }
