@@ -31,6 +31,7 @@
 #include <ESP8266WiFi.h>
 #include <AS5048A.h>
 
+
 // Define this if you want to run as an Access Point. If undefined it will connect to the
 // SSID with the password below....
 #define AP
@@ -46,8 +47,8 @@ int status = WL_IDLE_STATUS;
 
 // for smoothing sensor data
 #define samplesNumToAverage 20
-unsigned int smoothAzimuthValue[samplesNumToAverage];
-unsigned int smoothAltitudeValue[samplesNumToAverage];
+unsigned int smoothAzimuthValues[samplesNumToAverage];
+//unsigned int smoothAltitudeValue[samplesNumToAverage];
 
 //int ssl1=15;
 //int ssl2=16;
@@ -62,7 +63,7 @@ unsigned int smoothAltitudeValue[samplesNumToAverage];
 unsigned int smoothAzimuthData = 0;
 //word smoothAltitudeData = 0;
 //unsigned int value = 0;
-
+unsigned int Data[5];
 //byte altAGC;
 //byte aztAGC;
 //unsigned int magnitude;
@@ -75,12 +76,9 @@ unsigned int smoothAzimuthData = 0;
 //float angle = 0;
 //int i = 0;
 //int del = 10;
-unsigned int Data[5];
-int readError = -1;
+int readError=-1;
 
 WiFiServer server(23);
-
-// set up an instance of our sensor object
 AS5048A azimuthSensor(15);
 
 boolean alreadyConnected = false; // whether or not the client was connected previously
@@ -116,10 +114,10 @@ server.begin();
 
 // initialize and read the sensor till we get a good reading
 // we can expand on this later to fill up our smoothing array
-
 while (readError != -1){
-  readError = azimuthSensor.readAngle(Data)
+  readError = azimuthSensor.readData(Data);
 }
+
 } // end setup
 
 void loop() {
@@ -136,7 +134,7 @@ void loop() {
     Serial.println("     Gain");
     Serial.print("Data-1: ");
     Serial.print(Data[1]);
-    Serial.println("      Magnitude");
+    Serial.println("   Magnitude");
     Serial.print("Data-2: ");
     Serial.print(Data[2]);
     Serial.println("      Angle");
@@ -150,7 +148,7 @@ void loop() {
   
   delay(1000);
 
-  smoothAzimuthData = digitalSmooth(Data[2], smoothAzimuthValue);
+  smoothAzimuthData = digitalSmooth(Data[2], smoothAzimuthValues);
   Serial.print("Smooth Azimuth: ");
   Serial.println(smoothAzimuthData);
 
@@ -173,10 +171,8 @@ void loop() {
         // lets print a response and discard the rest of the bytes
         thisClient.print(PadTic(smoothAzimuthData));
         thisClient.print("\t000000\r\n");
-        Serial.print("Azimuth tic: ");
-        Serial.print(PadTic(smoothAzimuthData));
-        Serial.print(" Altitude tic: ");
-        Serial.println("000000");
+        Serial.print("Smoothed Azimuth Value: ");
+        Serial.print(smoothAzimuthData);
        // discard remaining bytes
        thisClient.flush();
       }
@@ -206,19 +202,20 @@ void printWifiStatus() {
 
 // pad the Tics value with leading zeros and return a string
 String PadTic(unsigned int tic){
-  String paddedTic;
-  if (tic < 10)
-    paddedTic = "+0000" + String(tic);
-  else if ( tic < 100 )
-    paddedTic = "+000" + String(tic);
-  else if ( tic < 1000 )
-    paddedTic = "+00" + String(tic);
-  else if ( tic < 10000 )
-    paddedTic = "+0" + String(tic);
-  else if ( tic < 100000 )
-    paddedTic = "+" + String(tic);
-  return paddedTic;
+String paddedTic;
+if (tic < 10)
+paddedTic = "+0000" + String(tic);
+else if ( tic < 100 )
+paddedTic = "+000" + String(tic);
+else if ( tic < 1000 )
+paddedTic = "+00" + String(tic);
+else if ( tic < 10000 )
+paddedTic = "+0" + String(tic);
+else if ( tic < 100000 )
+paddedTic = "+" + String(tic);
+return paddedTic;
 }
+
 // this function takes a rawSensorData reading, inserts the value into the 'oldest' slot
 // transfer the data into a pair of intermediate arrays used for sorting the values
 // inserts the value into the respective sorted arrays according to the following
@@ -276,8 +273,8 @@ unsigned int digitalSmooth(unsigned int rawSensorData, unsigned int *smoothSenso
   }
   Serial.println("");
   // throw out the top x% and bottom x% of samples but limit to throw out at least one
-  bottom = max(((samplesNumToAverage *15) / 100), 1);
-  top = min((((samplesNumToAverage * 85) / 100) + 1), samplesNumToAverage - 1);
+  bottom = 1;//max(((samplesNumToAverage *15) / 100), 1);
+  top = samplesNumToAverage; //min((((samplesNumToAverage * 85) / 100) + 1), samplesNumToAverage - 1);
   k = 0;
   total = 0;
   for ( j = bottom ; j < top ; j++ ){
