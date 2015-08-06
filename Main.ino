@@ -16,8 +16,10 @@
 
  July 6, 2015
  Added parity calculations to the commands
- Added second AS5048 with daisychain mode but for some reason it has both axis getting the same value.
 
+ August 5, 2015
+ So now it works, but not because of code, but because of good power supply.  AS5048A is sensitive
+ removed a buch of non working code and included a debuging ifdef
  
  */
 
@@ -28,6 +30,8 @@
 // SSID with the password below....
 
 #define AP 
+// uncomment the next line to turn on debugging
+//#define DEBUGGING
 
 char ssid[] = "braapppp"; //  your network SSID (name)
 char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
@@ -50,8 +54,9 @@ int status = WL_IDLE_STATUS;
 #define AS5048_REG_ERR 0x1
 #define AS5048_CMD_NOP 0x0
 
-int numToAverage=50;
-int ssl=15;
+#define numToAverage 50
+int azimuthSensorPin=15;
+int altitudeSensorPin=4;
 byte cmd_highbyte = 0;
 byte cmd_lowbyte = 0;
 byte alt_data_highbyte = 0;
@@ -61,17 +66,36 @@ byte azt_data_lowbyte = 0;
 word command = 0;
 word data = 0;
 unsigned int value = 0;
+unsigned int rawData;
 float angle = 0;
 int i = 0;
 int del = 10;
+
+// to support digital smooth
+unsigned int smoothAzimuthValues[numToAverage];
+unsigned int smoothAltitudeValues[numToAverage];
+// the array that will sotre the most recent numToAverage angles
+//float smoothAzimuthAngles[numToAverage];
+//float smoothAltitudeAngles[numToAverage];
+float smoothAzimuthValuesX[numToAverage];
+float smoothAzimuthValuesY[numToAverage];
+float smoothAltitudeValuesX[numToAverage];
+float smoothAltitudeValuesY[numToAverage];
+unsigned int smoothAzimuthValue = 0;
+unsigned int smoothAltitudeValue = 0;
+//float advancedCircularSmoothAzimuthAngle = 0;
+//float advancedCircularSmoothAltitudeAngle = 0;
+unsigned int circularSmoothAzimuthValue = 0;
+unsigned int circularSmoothAltitudeValue = 0;
 
 WiFiServer server(23);
 
 boolean alreadyConnected = false; // whether or not the client was connected previously
 
 void setup() {
-  //Initialize serial and wait for port to open:
+  //Initialize serial
   Serial.begin(115200);
+  delay(1000);
   
   #ifdef AP
     Serial.println("Setting up WiFi Access Point");
@@ -99,180 +123,60 @@ void setup() {
   #else
     printWifiStatus();
   #endif
-
-  pinMode(ssl, OUTPUT);
+  
   SPI.begin();                                                        // Wake up the buss
   SPI.setBitOrder(MSBFIRST);                                          // AS5048 is a Most Significant Bit first
   SPI.setDataMode(SPI_MODE1);                                         // AS5048 uses Mode 1
-  command = AS5048_CMD_READ | AS5048_REG_DATA;                        // Set up the command we will send
-  command = command | calcEvenParity(command)<<15;                    // assign the parity bit
-  cmd_highbyte = highByte(command);                                   // split it into bytes
-  cmd_lowbyte = lowByte(command);                                     //
-  digitalWrite(ssl, LOW);                                             // Drop ssl to enable the AS5048's
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the initial read command
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);                     // send the second read command
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-  digitalWrite(ssl, HIGH);                                            // disable the AS5048's
-}
+  // fill up our smoothing arrays with data
+  for (i = 1; i <= numToAverage; i++){
+    rawData = readTic(azimuthSensorPin);
+    circularSmoothAzimuthValue = circularSmooth(rawData, smoothAzimuthValuesX, smoothAzimuthValuesY);
+    rawData = readTic(altitudeSensorPin);
+    circularSmoothAltitudeValue = circularSmooth(rawData, smoothAltitudeValuesX, smoothAltitudeValuesY);
+  }
+} // end setup
 
 void loop() {
   // wait for a new client:
-  Serial.print(".");
-  delay(1000);
+  rawData = readTic(azimuthSensorPin);
+  circularSmoothAzimuthValue = circularSmooth(rawData, smoothAzimuthValuesX, smoothAzimuthValuesY);
+  Serial.print(" CircSmooth Az: ");
+  Serial.print(circularSmoothAzimuthValue);
+  rawData = readTic(altitudeSensorPin);
+  circularSmoothAltitudeValue = circularSmooth(rawData, smoothAltitudeValuesX, smoothAltitudeValuesY);
+  Serial.print(" CircSmooth Al: ");
+  Serial.println(circularSmoothAltitudeValue);
+  delay(1);
+  
   WiFiClient thisClient = server.available();
-
-
   // when the client sends the first byte, say hello:
   while (thisClient) {
     if (!alreadyConnected) {
-      Serial.println("");
-      Serial.println("We have a new client");
       alreadyConnected = true;
     }
     if (thisClient.connected()) {
       if (thisClient.available() > 0) {
         // if there are chars to read....
-        Serial.print("There are ");
-        Serial.print(thisClient.available());
-        Serial.println(" characters to be read");
         // lets print a response and discard the rest of the bytes
-        thisClient.print(PadTic(Tic("Azimuth")));
+        thisClient.print(PadTic(circularSmoothAzimuthValue));
         thisClient.print("\t");
-        thisClient.print(PadTic(Tic("Altitude")));
+        thisClient.print(PadTic(circularSmoothAltitudeValue));
         thisClient.print("\r\n");
-        Serial.print("Azimuth Angle: ");
-        Serial.print(Angle("Azimuth"));
-        Serial.print(" Altituge Angle: ");
-        Serial.println(Angle("Altitude"));
         Serial.print("Azimuth tic: ");
-        Serial.print(PadTic(Tic("Azimuth")));
+        Serial.print(PadTic(smoothAzimuthValue));
         Serial.print(" Altitude tic: ");
-        Serial.println(PadTic(Tic("Altitude")));
+        Serial.println(PadTic(smoothAltitudeValue));
         // discard remaining bytes
         thisClient.flush();
       }
     }
     else {
-      Serial.println("diconnecting");
       thisClient.stop();
       alreadyConnected = false;
     }
   }
 }
 
-float Angle(String axis) {
-  // take an axis and read that sensor to get the angle
-  float angles[numToAverage];  // this works for small changes away from 0 degrees
-  float xCoord[numToAverage];  // but we need to do some math to make averages
-  float yCoord[numToAverage];  // work for circular measurements
-  float angle;
-  float averageAngle = 0;
-  float averageX = 0;
-  float averageY = 0;
-  int myCounter = 0;
-  command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
-  command |= calcEvenParity(command)<<15;           // or with the parity of the command
-  cmd_highbyte = highByte(command);                 // split it into high and low byte
-  cmd_lowbyte = lowByte(command);
-  digitalWrite(ssl,LOW);                            // select the chip
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
-  digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was
-
-  for (myCounter = 0; myCounter <numToAverage; myCounter++ ){    
-    digitalWrite(ssl,LOW);                          
-    alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
-    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
-    azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);
-    digitalWrite(ssl,HIGH);                         // close the chip
-    if (axis ==  "Altitude") {
-      data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
-      data = data << 8;                             // shift left 8 bits
-      data = data | alt_data_lowbyte;               // tack on the low byte
-    } else {
-      data = azt_data_highbyte;
-      data = data << 8;
-      data = data | azt_data_lowbyte;
-    }
-    value = data & 0x3FFF;                      // mask off the top two bits
-    angles[myCounter] = (float(value)/16383)*360;// calculate the angle that represents
-    xCoord[myCounter] = cos(angles[myCounter] * DEG_TO_RAD);
-    yCoord[myCounter] = sin(angles[myCounter] * DEG_TO_RAD);
-  }
-  for (myCounter = 0; myCounter <numToAverage; myCounter++){
-    averageAngle = averageAngle + angles[myCounter];
-    averageX = averageX + xCoord[myCounter];
-    averageY = averageY + xCoord[myCounter];
-  }
-  averageAngle = averageAngle/numToAverage;
-  averageX = averageX/numToAverage;
-  averageY = averageY/numToAverage;
-  averageAngle = atan2(averageX,averageY) * RAD_TO_DEG;
-  return averageAngle;
-}
-
-unsigned int Tic(String axis) {
-  // take an axis and read that sensor to get the raw encoder value
- // unsigned int tics[numToAverage];
-  float angles[numToAverage];
-  float xCoord[numToAverage];
-  float yCoord[numToAVerage];
-  float averageX = 0;
-  float averageY = 0;
-  float angle;
-  unsigned int tic;
-  float averageTic = 0;
-  int myCounter = 0;
-  command = AS5048_CMD_READ | AS5048_REG_DATA;      // read data register
-  command |= calcEvenParity(command)<<15;           // or with the parity of the command
-  cmd_highbyte = highByte(command);                 // split it into high and low byte
-  cmd_lowbyte = lowByte(command);                   
-  digitalWrite(ssl,LOW);                            // select the chip
-  alt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
-  alt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command
-  azt_data_highbyte = SPI.transfer(cmd_highbyte);   // send a read command, and store the return value of the previous command in data
-  azt_data_lowbyte = SPI.transfer(cmd_lowbyte);     // rest of the read command  
-  digitalWrite(ssl,HIGH);                           // but throw those two away as we don't know what the previous command was
-
-
-  for (myCounter = 0; myCounter <numToAverage; myCounter++ ){    
-    digitalWrite(ssl,LOW);                          
-    alt_data_highbyte = SPI.transfer(cmd_highbyte); // send the highbyte and lowbyte 
-    alt_data_lowbyte = SPI.transfer(cmd_lowbyte);   // and read high and low byte for altitude
-    azt_data_highbyte = SPI.transfer(cmd_highbyte); // same for azimuth
-    azt_data_lowbyte = SPI.transfer(cmd_lowbyte);   
-    digitalWrite(ssl,HIGH);                         // close the chip
-   
-    if (axis ==  "Altitude") {
-      data = alt_data_highbyte;                     // Store the high byte in my 16 bit varriable
-      data = data << 8;                             // shift left 8 bits
-      data = data | alt_data_lowbyte;               // tack on the low byte
-    } else {
-      data = azt_data_highbyte;
-      data = data << 8;
-      data = data | azt_data_lowbyte;
-    }
-    value = data & 0x3FFF;                          // mask off the top two bits
-    angles[myCounter] = (float(value)/16383)*360;   // calculate the angle that represents
-    xCoord[myCounter] = cos(angles[myCounter]);
-    yCoord[myCounter] = sin(angles[myCounter]);
-  }
-  for (myCounter = 0; myCounter <numToAverage; myCounter++){
-    averageAngle = averageAngle + angless[myCounter];
-    averageX = averageX + xCoord[myCounter];
-    averageY = averageY + yCoord[myCounter];
-  }
-  averageAngle = averageAngle/numToAverage;
-  averageX = averageX/numToAverage;
-  averageY = averageY/numToAverage;
-  averageAngle = atan2(averageX, averageY);
-  averageTic = (int)(averageAngle*16383/360);
-  return averageTic;
-}
 
 // pad the Tics value with leading zeros and return a string
 String PadTic(unsigned int tic){
@@ -307,6 +211,37 @@ byte calcEvenParity(word value) {
   // all odd binaries end in 1
   return count & 0x1;
 }
+// This just trims the bottom 14 bits off of a sensor read
+unsigned int readTic(int cs){
+  unsigned int rawData;
+  unsigned int realData;
+  rawData = readSensor(cs);
+  realData = rawData & 0x3fff; 
+  return realData;
+}
+// Read the sensor REG_DATA register
+unsigned int readSensor(int cs){
+  unsigned int data;
+  unsigned int data_highbyte;
+  unsigned int data_lowbyte;
+  pinMode(cs, OUTPUT);                                       
+  command = AS5048_CMD_READ | AS5048_REG_DATA;                        // Set up the command we will send
+  command |= calcEvenParity(command) <<15;                            // assign the parity bit
+  cmd_highbyte = highByte(command);                                   // split it into bytes
+  cmd_lowbyte = lowByte(command);                                     //
+  digitalWrite(cs, LOW);                                             // Drop ssl to enable the AS5048's
+  data_highbyte = SPI.transfer(cmd_highbyte);                         // send the initial read command
+  data_lowbyte = SPI.transfer(cmd_lowbyte);
+  digitalWrite(cs, HIGH);                                            // disable the AS5048's
+  digitalWrite(cs, LOW);                                             // Drop ssl to enable the AS5048's
+  data_highbyte = SPI.transfer(cmd_highbyte);                         // send the initial read command
+  data_lowbyte = SPI.transfer(cmd_lowbyte);
+  digitalWrite(cs, HIGH);                                            // disable the AS5048's  
+  data = data_highbyte;                                               // Store the high byte in my 16 bit varriable
+  data = data << 8;                                                   // shift left 8 bits
+  data = data | alt_data_lowbyte;                                     // tack on the low byte
+  return data;
+}
 
 void printWifiStatus() {
   // print the SSID of the network you're attached to:
@@ -324,4 +259,44 @@ void printWifiStatus() {
   Serial.print(rssi);
   Serial.println(" dBm");
 }
+
+// this function takes a rawSensorData reading converts it to and angle
+// inserts the X and Y coordinates of that angle on the unit ciricle into two 
+// arrays that hold the last 50 values read from the sensor
+// 
+unsigned int circularSmooth(unsigned int rawSensorData, float *smoothSensorDataX, float *smoothSensorDataY){
+  int j;
+  double totalX = 0;
+  double averageX = 0;
+  double totalY = 0;
+  double averageY = 0;
+  double angle = 0;
+  static int currentCircularSmoothPosition;
+  float currentAngle;
+//  Serial.print("Raw: ");
+//  Serial.println(rawSensorData);
+  angle = (((float) rawSensorData)/16393 ) * 360;
+//  Serial.print("angle: ");
+//  Serial.println(angle);
+//  Serial.print("Current Circular Smooth Position: ");
+//  Serial.println(currentCircularSmoothPosition);
+  currentCircularSmoothPosition = ( currentCircularSmoothPosition + 1 ) % numToAverage; // increment the counter and roll over if needed
+  smoothSensorDataX[currentCircularSmoothPosition] = cos((angle * PI) /  180); // insert the new value into the oldest slot
+  smoothSensorDataY[currentCircularSmoothPosition] = sin((angle * PI) /  180); // insert the new value into the oldest slot
+  for ( j = 0 ; j < numToAverage ; j++ ){
+    totalX += smoothSensorDataX[j];
+    totalY += smoothSensorDataY[j];
+  }
+  averageX = totalX / numToAverage;
+  averageY = totalY / numToAverage;
+  currentAngle = atan2(averageY , averageX);
+  if (currentAngle >=0 ) {
+    // if the retruned value of angle is positive it is a positive rotation between 0 and 180 degres
+    return (unsigned int) ((((currentAngle / PI) * 180) / 360 ) * 16393);
+  } else {
+    // convert the negative angel to a posive rotation from 0 degres counterclockwise
+    return (unsigned int) (((((2 * PI + currentAngle) / PI) * 180) / 360) * 16393);
+  }
+}
+
 
