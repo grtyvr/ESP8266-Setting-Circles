@@ -71,7 +71,7 @@ int status = WL_IDLE_STATUS;
 #define numToAverage 20
 #define discardNumber 2     // 2x this number must be less than numToAverage
 int azimuthSensorPin=15;
-int altitudeSensorPin=4;
+int altitudeSensorPin=5;
 byte cmd_highbyte = 0;
 byte cmd_lowbyte = 0;
 byte alt_data_highbyte = 0;
@@ -82,16 +82,16 @@ word command = 0;
 word data = 0;
 unsigned int value = 0;
 unsigned int rawData;
-float angle = 0;
+double angle = 0;
 int i = 0;
 int del = 10;
 
 // the arrays that will store the most recent numToAverage angles
-float smoothAzimuthAngles[numToAverage];
-float smoothAltitudeAngles[numToAverage];
+double smoothAzimuthAngles[numToAverage];
+double smoothAltitudeAngles[numToAverage];
 // the value of the current Azimuth and Altitude angle that we will report back to Sky Safari
-float advancedCircularSmoothAzimuthAngle = 0;
-float advancedCircularSmoothAltitudeAngle = 0;
+double advancedCircularSmoothAzimuthAngle = 0;
+double advancedCircularSmoothAltitudeAngle = 0;
 
 WiFiServer server(23);
 
@@ -146,17 +146,21 @@ void loop() {
   rawData = readTic(azimuthSensorPin);
   rawData &= 0x3FFE; // discard the least significant bit(s)
   advancedCircularSmoothAzimuthAngle = advancedCircularSmooth(ticsToAngle(rawData), 1, advancedCircularSmoothAzimuthAngle, smoothAzimuthAngles);
-  Serial.print("Raw Angle: ");
-  Serial.print(ticsToAngle(rawData));
-  Serial.print(" CircSmooth Az: ");
-  Serial.print(advancedCircularSmoothAzimuthAngle);
+  #ifdef DEBUGGING
+    Serial.print("Raw Angle: ");
+    Serial.print(ticsToAngle(rawData));
+    Serial.print(" CircSmooth Az: ");
+    Serial.print(advancedCircularSmoothAzimuthAngle);
+  #endif
   rawData = readTic(altitudeSensorPin);
   rawData &= 0x3FFE; // discard the least significant bit(s)
   advancedCircularSmoothAltitudeAngle = advancedCircularSmooth(ticsToAngle(rawData), 2, advancedCircularSmoothAltitudeAngle, smoothAltitudeAngles);
-  Serial.print(" Raw Angle: ");
-  Serial.print(ticsToAngle(rawData));
-  Serial.print(" CircSmooth Al: ");
-  Serial.println(advancedCircularSmoothAltitudeAngle);
+  #ifdef DEBUGGING
+    Serial.print(" Raw Angle: ");
+    Serial.print(ticsToAngle(rawData));
+    Serial.print(" CircSmooth Al: ");
+    Serial.println(advancedCircularSmoothAltitudeAngle);
+  #endif
   delay(1);
   
   WiFiClient thisClient = server.available();
@@ -173,10 +177,12 @@ void loop() {
         thisClient.print("\t");
         thisClient.print(PadTic(angleToTics(advancedCircularSmoothAltitudeAngle), "+"));
         thisClient.print("\r\n");
-        Serial.print("Azimuth tic: ");
-        Serial.print(PadTic(angleToTics(advancedCircularSmoothAzimuthAngle), "-"));
-        Serial.print(" Altitude tic: ");
-        Serial.println(PadTic(angleToTics(advancedCircularSmoothAltitudeAngle), "-"));
+        #ifdef DEBUGGING
+          Serial.print("Azimuth tic: ");
+          Serial.print(PadTic(angleToTics(advancedCircularSmoothAzimuthAngle), "-"));
+          Serial.print(" Altitude tic: ");
+          Serial.println(PadTic(angleToTics(advancedCircularSmoothAltitudeAngle), "-"));
+        #endif
         // discard remaining bytes
         thisClient.flush();
       }
@@ -283,18 +289,18 @@ void printWifiStatus() {
 //   do an insertion sort on this mean distance array and record the transpositions in the index array
 //   throw out the bottom 10% and top 10% of values
 //   use that array to find the new angular mean.
-float advancedCircularSmooth(float newAngle, int axis, float currentCircSmoothValue, float *pastSensorReadings) {
+double advancedCircularSmooth(double newAngle, int axis, double currentCircSmoothValue, double *pastSensorReadings) {
   int j, k;
   int bottom, top;
   static int currentPosition1;  // this is a hack to take into account we are calling this function on two different arrays
   static int currentPosition2;  //
   int currentPosition;
-  float tempFloat;
+  double tempFloat;
   int tempInt;
-  float sortedAngles[numToAverage];
-  float sortedDeltas[numToAverage];
+  double sortedAngles[numToAverage];
+  double sortedDeltas[numToAverage];
   int sortedIndex[numToAverage];
-  float anglesToAverage[numToAverage - 2 * discardNumber];
+  double anglesToAverage[numToAverage - 2 * discardNumber];
   double currentAverageAngle;
   // increment the couter based on the axis we are smoothing
   if ( axis == 1 ) {                                  
@@ -335,12 +341,12 @@ float advancedCircularSmooth(float newAngle, int axis, float currentCircSmoothVa
   for ( j = discardNumber; j < numToAverage - discardNumber; j++ ) {
     anglesToAverage[j - discardNumber] = sortedAngles[j - discardNumber];  
   }
-  return (float) circularAverage(anglesToAverage);
+  return (double) circularAverage(anglesToAverage);
 }
 
 // return the circular mean of the angles using the atan2 method
 // takes a pointer to an array of angles
-double circularAverage( float *anglesToAverage){
+double circularAverage( double *anglesToAverage){
   int j;
   int k;
   double totalX = 0;
@@ -349,7 +355,7 @@ double circularAverage( float *anglesToAverage){
   double averageY = 0;
   double angle = 0;
   double retVal = 0;
-  k = (sizeof(anglesToAverage)/sizeof(float));
+  k = (sizeof(anglesToAverage)/sizeof(double));
   for ( j = 0; j < k ; j++) { 
     yield(); 
    totalX += cos((double) ((anglesToAverage[j] * PI) / 180));
@@ -369,25 +375,26 @@ double circularAverage( float *anglesToAverage){
 }
 
 // convert an angle to tics
-unsigned int angleToTics( float angle){
+unsigned int angleToTics( double angle){
   unsigned int retVal = 0; 
   retVal = (unsigned int) ((angle / 360) * 16383);
   return retVal;
 }
 
 // convert tics to angle
-float ticsToAngle ( unsigned int tics) {
-  float retVal;
-  retVal = (float) (( (float) tics / (float) 16383 ) * 360 );
+double ticsToAngle ( unsigned int tics) {
+  double retVal;
+  retVal = (double) (( (double) tics / (double) 16383 ) * 360 );
   return retVal;
 }
 
 // Return the minimal angular separation for two angeles.  Returns between 0 and 180 for any two input values
-float angularSeparation(float angleOne, float angleTwo){
-  float retVal = 0; 
-  retVal = abs(angleOne - angleTwo);
-  if (retVal > 180 ) {
-   retVal = 360 - retVal;
+double angularSeparation(double angleOne, double angleTwo){
+  float retVal = 0;
+  retVal = fabs(angleOne - angleTwo);
+  if ( retVal > 180 ) {
+   retVal = 360 - retVal; 
   }
   return retVal;
+
 }
