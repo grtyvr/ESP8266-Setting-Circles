@@ -385,18 +385,9 @@ float ticsToAngle ( unsigned int tics) {
 // Return the minimal angular separation for two angeles.  Returns between 0 and 180 for any two input values
 float angularSeparation(float angleOne, float angleTwo){
   float retVal = 0; 
-  if ( angleOne >= 0 & angleOne < 180) {
-    if ( angleTwo >= 0 & angleTwo < 180 ) {
-      retVal = abs(angleOne - angleTwo);
-    } else {
-      retVal = angleOne + 360 - angleTwo;
-    }
-  } else {
-    if ( angleTwo >= 180 & angleTwo < 360 ) {
-      retVal =  abs(angleOne - angleTwo);
-    } else {
-      retVal =  360 - angleOne + angleTwo;
-    }
+  retVal = abs(angleOne - angleTwo);
+  if (retVal > 180 ) {
+   retVal = 360 - retVal;
   }
   return retVal;
 }
