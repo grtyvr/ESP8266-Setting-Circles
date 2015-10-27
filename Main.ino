@@ -83,6 +83,7 @@ word data = 0;
 unsigned int value = 0;
 unsigned int rawData;
 double angle = 0;
+double increment = 360/16384; // This is the smallest angular increment that is reportable from the sensors.
 int i = 0;
 int del = 10;
 
@@ -375,22 +376,31 @@ double circularAverage( double *anglesToAverage){
 }
 
 // convert an angle to tics
+// expects 0 <= angle < 360 but will do the sensible thing with the upper endpoint
+// if 360 - angle >= increment/2 wrap to 0
 unsigned int angleToTics( double angle){
+  // double increment = 360/16384;
   unsigned int retVal = 0; 
-  retVal = (unsigned int) ((angle / 360) * 16383);
+  retVal = (unsigned int) (((angle + (increment /2 )) / 360) * 16384);
+  if ( retVal > 16383 ) {  
+   retVal = retVal - 16384;               // make sure we wrap around if need be
+  }
   return retVal;
+
 }
 
 // convert tics to angle
+// expects a value from 0 to 16383
 double ticsToAngle ( unsigned int tics) {
+  // double increment = 360/16384;
   double retVal;
-  retVal = (double) (( (double) tics / (double) 16383 ) * 360 );
+  retVal = tics * increment;
   return retVal;
 }
 
 // Return the minimal angular separation for two angeles.  Returns between 0 and 180 for any two input values
 double angularSeparation(double angleOne, double angleTwo){
-  float retVal = 0;
+  double retVal = 0;
   retVal = fabs(angleOne - angleTwo);
   if ( retVal > 180 ) {
    retVal = 360 - retVal; 
