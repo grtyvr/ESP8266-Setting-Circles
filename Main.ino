@@ -1,4 +1,4 @@
-/*
+ /*
  Based on: 
  Chat  Server
 
@@ -82,8 +82,8 @@ word command = 0;
 word data = 0;
 unsigned int value = 0;
 unsigned int rawData;
+double increment = (double) 360 / 16384;  // this is the smallest angular increment that is reportable by the sensors
 double angle = 0;
-double increment = 360/16384; // This is the smallest angular increment that is reportable from the sensors.
 int i = 0;
 int del = 10;
 
@@ -162,7 +162,7 @@ void loop() {
     Serial.print(" CircSmooth Al: ");
     Serial.println(advancedCircularSmoothAltitudeAngle);
   #endif
-  delay(1);
+  delay(1000);
   
   WiFiClient thisClient = server.available();
   // when the client sends the first byte, say hello:
@@ -258,6 +258,9 @@ unsigned int readSensor(int cs){
   data = data_highbyte;                                               // Store the high byte in my 16 bit varriable
   data = data << 8;                                                   // shift left 8 bits
   data = data | data_lowbyte;                                         // tack on the low byte
+  #ifdef DEBUGGING
+    Serial.println(data);
+  #endif
   return data;
 }
 
@@ -356,7 +359,7 @@ double circularAverage( double *anglesToAverage){
   double averageY = 0;
   double angle = 0;
   double retVal = 0;
-  k = (sizeof(anglesToAverage)/sizeof(double));
+  k = numToAverage - ( 2 * discardNumber );
   for ( j = 0; j < k ; j++) { 
     yield(); 
    totalX += cos((double) ((anglesToAverage[j] * PI) / 180));
@@ -364,35 +367,33 @@ double circularAverage( double *anglesToAverage){
   }
   averageX = totalX / k;
   averageY = totalY / k;
-  angle = atan2(averageY , averageX);
-  if (angle >= 0) {
-    // if the returned value of angle is positive it is a positive rotation (CCW) between 0 and 180 degress
-    retVal = (double) ((angle / PI) * 180);
+  if ( averageX == 0 && averageY == 0 ) { 
+    angle = 0;                                 // just to be safe define a value where atan2 is undefined
   } else {
-    // convert the negative angle to a positive rotation from 0 degrees (CCW)
-    retVal =  (double) ((( 2 * PI ) + angle) / PI ) * 180;
+    angle = atan2(averageY , averageX);
+    if (angle >= 0) {
+      // if the returned value of angle is positive it is a positive rotation (CCW) between 0 and 180 degress
+      retVal = (double) ((angle / PI) * 180);
+    } else {
+      // convert the negative angle to a positive rotation from 0 degrees (CCW)
+      retVal =  (double) ((( 2 * PI ) + angle) / PI ) * 180;
+    }
   }
   return retVal;
 }
 
 // convert an angle to tics
-// expects 0 <= angle < 360 but will do the sensible thing with the upper endpoint
-// if 360 - angle >= increment/2 wrap to 0
 unsigned int angleToTics( double angle){
-  // double increment = 360/16384;
   unsigned int retVal = 0; 
-  retVal = (unsigned int) (((angle + (increment /2 )) / 360) * 16384);
-  if ( retVal > 16383 ) {  
-   retVal = retVal - 16384;               // make sure we wrap around if need be
+  retVal = (unsigned int) (((angle + (increment / 2)) / 360 ) * 16384);
+  if ( retVal > 16383 ) {
+    retVal = retVal - 16384;
   }
   return retVal;
-
 }
 
 // convert tics to angle
-// expects a value from 0 to 16383
 double ticsToAngle ( unsigned int tics) {
-  // double increment = 360/16384;
   double retVal;
   retVal = tics * increment;
   return retVal;
