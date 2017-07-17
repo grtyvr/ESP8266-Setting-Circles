@@ -1,39 +1,21 @@
  /*
- Based on: 
- Chat  Server
-
- created 18 Dec 2009
- by David A. Mellis
- modified 31 May 2012
- by Tom Igoe
-
- Modified to accept connections from SkySafari over the network and send back angle data
- from AS5048 angle sensors
-
- Thanks to the folks at ZoetropeLabs for example code to access the AS5048's
- https://github.com/ZoetropeLabs/AS5048A-Arduino
-
- July 5, 2015
- Added running as a WiFi Access point
- Added code to read an AS5048 
-
- July 6, 2015
- Added parity calculations to the commands
-
- August 5, 2015
- So now it works, but not because of code, but because of good power supply.  AS5048A is sensitive
- removed a buch of non working code and included a debuging ifdef
-
- August 8, 2015
+ 
  Well, it actually did not work.  There were two bugs and despite them it gave close to accurate results.
   1) 2^14 is not 16393 it is 16383.
   2) when you truncate off the bottom 8 bits of a 14 bit number that is only losing about 1.5 degres of precision.
  
  To Do:
-
  1) Make the AS5048 stuff into a library and add some functions/features for sensor positioning using the MAG register.
  2) Do some error checking on the sensor readings.  ( low priority.  They seen very reliable )
  3) Figure out how to do OTA updates on the ESP8246.  At the very least that would be cool!
+
+ July 4 2016
+ major refactoring.  I was naieve to think that a linear boxcar smoothing with discarding outlier data could be
+ made to work.  I forgot totaly about edge cases for sorting an array of values that wrap around from 360 == 0
+ Circular smoothing using the atan2 method with boxcar works much better.  The basic idea is to keep a ring buffer
+ with the last n smoothed data points in it. When you collect a new data point you add it to the oldest position in
+ the buffer and calculate the circular mean of the resulting angles, then store the new smooted value in the buffer
+ at the oldest value position. Emperical testing with n=10 sesms to make a nice feel to the data with negligible jitter.
  
  */
 
@@ -47,13 +29,13 @@
 // uncomment the next line to turn on debugging
 //#define DEBUGGING
 
-char ssid[] = "braapppp"; //  your network SSID (name)
-char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
+char ssid[] = "braapppp";                                   //  your network SSID (name)
+char pass[] = "";                                           // your network password (use for WPA, or use as key for WEP)
 
 const char *apssid = "ESPap";
 const char *appassword = "gofish";
 
-int keyIndex = 0;            // your network key Index number (needed only for WEP)
+int keyIndex = 0;                                           // your network key Index number (needed only for WEP)
 
 int status = WL_IDLE_STATUS;
 
@@ -68,135 +50,248 @@ int status = WL_IDLE_STATUS;
 #define AS5048_REG_ERR 0x1
 #define AS5048_CMD_NOP 0x0
 
-#define numToAverage 20
-#define discardNumber 2     // 2x this number must be less than numToAverage
-int azimuthSensorPin=15;
-int altitudeSensorPin=5;
-byte cmd_highbyte = 0;
+#define numToAve 10                                         // This is the number of past readings we will use to create our
+                                                            // moving average
+int azPin=15;                                               // azimuth sensor CSEL pin. Depending on how you build your
+                                                            // hardware you might need to change
+int altPin=5;                                               // altitude sensor CSEL pin. Same with this.
+int curArrayPos=0;                                          // this is a counter to store the current array position that
+                                                            // we will place the new reading in
+byte cmd_highbyte = 0;                                      //
 byte cmd_lowbyte = 0;
 byte alt_data_highbyte = 0;
 byte alt_data_lowbyte = 0;
 byte azt_data_highbyte = 0;
 byte azt_data_lowbyte = 0;
 word command = 0;
-word data = 0;
 unsigned int value = 0;
 unsigned int rawData;
-double increment = (double) 360 / 16384;  // this is the smallest angular increment that is reportable by the sensors
-double angle = 0;
-int i = 0;
-int del = 10;
+double increment = (double) 360 / 16384;                    // this is the smallest angular increment 
+                                                            // that is reportable by the sensors
+int i = 0;                                                  // declare a counter
+int del = 2;                                                // 
 
 // the arrays that will store the most recent numToAverage angles
-double smoothAzimuthAngles[numToAverage];
-double smoothAltitudeAngles[numToAverage];
+double smoothAzAngles[numToAve];
+double smoothAltAngles[numToAve];
 // the value of the current Azimuth and Altitude angle that we will report back to Sky Safari
-double advancedCircularSmoothAzimuthAngle = 0;
-double advancedCircularSmoothAltitudeAngle = 0;
+double smoothAzAngle = 0;
+double smoothAltAngle = 0;
 
-WiFiServer server(23);
+WiFiServer server(23);                                      // define an instance of a WIfi Server called 'server'
 
-boolean alreadyConnected = false; // whether or not the client was connected previously
+boolean alreadyConnected = false;                           // whether or not the client was connected previously
 
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//
 void setup() {
-  //Initialize serial
-  Serial.begin(115200);
-  delay(1000);
-  
-  #ifdef AP
-    Serial.println("Setting up WiFi Access Point");
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(apssid);
-    Serial.print("AP IP Address: ");
-    Serial.println(WiFi.softAPIP());
-  #else 
-    // attempt to connect to Wifi network:  
-    while ( status != WL_CONNECTED) {
-      Serial.print("Attempting to connect to SSID: ");
-      Serial.println(ssid);
-      // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
-      status = WiFi.begin(ssid, pass);
+//
 
-      // wait 10 seconds for connection:
-      delay(5000);
+  Serial.begin(115200);                                     // Initialize serial
+  delay(1000);                                              // and pause
+  
+  #ifdef AP                                                 // If we starting as an access point
+    Serial.println("Setting up WiFi Access Point");         // alert the console that we are going to...
+    WiFi.mode(WIFI_AP);                                     // start up as access point
+    WiFi.softAP(apssid);                                    // use the const defined at the top for the SSID
+    Serial.print("AP IP Address: ");                        // alert the console with our IP address
+    Serial.println(WiFi.softAPIP());                        //
+  #else                                                     // else attempt to connect to Wifi network:  
+    while ( status != WL_CONNECTED) {                       //   try to connect, forever!
+      Serial.print("Attempting to connect to SSID: ");      //  alert the console of our plight
+      Serial.println(ssid);                                 //  in case they can help?
+      status = WiFi.begin(ssid, pass);                      // Connect to WPA/WPA2 network. Change this line if using open or
+                                                            // WEP network:
+      delay(5000);                                          // wait 5 seconds for connection:
     }
   #endif
 
-  // start the server:
-  server.begin();
+  
+  server.begin();                             // start the server:
   // you're connected now, so print out the status:
   #ifdef AP
   #else
     printWifiStatus();
   #endif
   
-  SPI.begin();                                                        // Wake up the buss
-  SPI.setBitOrder(MSBFIRST);                                          // AS5048 is a Most Significant Bit first
-  SPI.setDataMode(SPI_MODE1);                                         // AS5048 uses Mode 1
+  SPI.begin();                                              // Wake up the buss
+  SPI.setBitOrder(MSBFIRST);                                // AS5048 is a Most Significant Bit first
+  SPI.setDataMode(SPI_MODE1);                               // AS5048 uses Mode 1
   // fill up our smoothing arrays with data
-  for (i = 1; i <= numToAverage; i++){
-    rawData = readTic(azimuthSensorPin);
-    advancedCircularSmoothAzimuthAngle = advancedCircularSmooth(ticsToAngle(rawData), 1, advancedCircularSmoothAzimuthAngle, smoothAzimuthAngles);
-    rawData = readTic(altitudeSensorPin);
-    advancedCircularSmoothAltitudeAngle = advancedCircularSmooth(ticsToAngle(rawData), 2, advancedCircularSmoothAltitudeAngle, smoothAltitudeAngles);
+  for (i = 0; i < numToAve; i++){
+    rawData = readTic(azPin);
+    smoothAzAngles[i] = ticsToAngle(rawData);
+    rawData = readTic(altPin);
+    smoothAltAngles[i] = ticsToAngle(rawData);
   }
+  curArrayPos = numToAve - 1;                               // set our position counter so that we know where the oldest value is
+                                                            // in this case it is the last element of the array numToAve - 1
 } // end setup
+//
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//
 void loop() {
-  // wait for a new client:
-  rawData = readTic(azimuthSensorPin);
-  rawData &= 0x3FFE; // discard the least significant bit(s)
-  advancedCircularSmoothAzimuthAngle = advancedCircularSmooth(ticsToAngle(rawData), 1, advancedCircularSmoothAzimuthAngle, smoothAzimuthAngles);
+//
+//
+
+  curArrayPos = (curArrayPos + 1 ) % numToAve;              // update a counter to keep track of the current
+                                                            // position in the arrays of readings. This will
+                                                            // always be an integer between 0 and numToAverage inclusive
+                                                          
+                                                            // each time through the main loop we will get the current
+                                                            // sensor readings for each axis and update the array with
+                                                            // the smoothed value
+  rawData = readTic(azPin);                                 // read the tics of Azimuth pin
+  smoothAzAngles[curArrayPos] = ticsToAngle(rawData);       // put the unsmoothed value in the array at the curArrayPos
+  smoothAzAngle = circularMean(smoothAzAngles);             // send the array off for calculating the circularMean
+  smoothAzAngles[curArrayPos] = smoothAzAngle;              // and store the filtered angle in our array
   #ifdef DEBUGGING
-    Serial.print("Raw Angle: ");
+    Serial.print("Raw Az Data: ");
+    Serial.print(rawData);
+    Serial.print(" Raw Az Angle: ");
     Serial.print(ticsToAngle(rawData));
     Serial.print(" CircSmooth Az: ");
-    Serial.print(advancedCircularSmoothAzimuthAngle);
+    Serial.print(smoothAzAngle);
   #endif
-  rawData = readTic(altitudeSensorPin);
-  rawData &= 0x3FFE; // discard the least significant bit(s)
-  advancedCircularSmoothAltitudeAngle = advancedCircularSmooth(ticsToAngle(rawData), 2, advancedCircularSmoothAltitudeAngle, smoothAltitudeAngles);
+  rawData = readTic(altPin);                                // and the same for the altitude pin
+  smoothAltAngles[curArrayPos] = ticsToAngle(rawData);      // store the raw data in the array
+  smoothAltAngle = circularMean(smoothAltAngles);           // send the array off for processing
+  smoothAltAngles[curArrayPos] = smoothAltAngle;            // store the filtered value.
   #ifdef DEBUGGING
-    Serial.print(" Raw Angle: ");
+    Serial.print("Raw Alt Data: ");
+    Serial.print(rawData);
+    Serial.print(" Raw Alt Angle: ");
     Serial.print(ticsToAngle(rawData));
     Serial.print(" CircSmooth Al: ");
-    Serial.println(advancedCircularSmoothAltitudeAngle);
+    Serial.println(smoothAltAngle);
   #endif
-  delay(1000);
+  delay(del);                                               // and hang for a bit...
   
-  WiFiClient thisClient = server.available();
-  // when the client sends the first byte, say hello:
-  while (thisClient) {
-    if (!alreadyConnected) {
-      alreadyConnected = true;
+  WiFiClient thisClient = server.available();               // wait for a new client:  
+  Serial.println("Waiting");
+
+  while (thisClient) {                                      // wait for a connection from SkySafari
+    if (!alreadyConnected) {                                // if this is a not a new connection
+      alreadyConnected = true;                              // say we have a connection
     }
-    if (thisClient.connected()) {
-      if (thisClient.available() > 0) {
-        // if there are chars to read....
-        // lets print a response and discard the rest of the bytes
-        thisClient.print(PadTic(angleToTics(advancedCircularSmoothAzimuthAngle), "+"));
-        thisClient.print("\t");
-        thisClient.print(PadTic(angleToTics(advancedCircularSmoothAltitudeAngle), "+"));
-        thisClient.print("\r\n");
-        #ifdef DEBUGGING
+    if (thisClient.connected()) {                           // if we are connected to a client
+      if (thisClient.available() > 0) {                     //  if there are chars to read.
+                                                            //    this is where we need to actually read what the client
+                                                            //    is sending but we assume that what is sent is a R = read
+                                                            //    command 
+                                                            //    lets print a response and discard the rest of the bytes
+        thisClient.print(PadTic(angleToTics(smoothAzAngle), "+"));  //  send back the data packet
+        thisClient.print("\t");                                     //  starts with the data and then a + \t
+        thisClient.print(PadTic(angleToTics(smoothAltAngle), "+")); //  then another data packet with a +
+        thisClient.print("\r\n");                                   //  end with \r\n
+                                                                    //  the data packet needs to have fixed length so
+                                                                    //  we pad the acual data to 7 digits
+        #ifdef DEBUGGING                                            
+          Serial.println("sending data to client");
           Serial.print("Azimuth tic: ");
-          Serial.print(PadTic(angleToTics(advancedCircularSmoothAzimuthAngle), "-"));
+          Serial.print(PadTic(angleToTics(smoothAzAngle), "+"));
           Serial.print(" Altitude tic: ");
-          Serial.println(PadTic(angleToTics(advancedCircularSmoothAltitudeAngle), "-"));
+          Serial.println(PadTic(angleToTics(smoothAltAngle), "+"));
         #endif
         // discard remaining bytes
-        thisClient.flush();
+        thisClient.flush();                                 // discard anything else the client sent
       }
     }
-    else {
-      thisClient.stop();
-      alreadyConnected = false;
+    else {                                                  // this was not a new connection !?
+      thisClient.stop();                                    // stop the client, since we must have processed it above
+      alreadyConnected = false;                             // say we are ready for a new connection
     }
   }
+} // End loop()
+//
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+///////////////// Functions and procedures ///////////////////////////////////////////////////////////////
+//
+/////////////////
+//
+// readSensor
+// Read the sensor REG_DATA register
+// WARNING: this data might be meaningless!  The previous data packet might have triggered a read
+//          and thus the buffer is stale
+//
+unsigned int readSensor(int cs){
+  unsigned int data;
+  unsigned int data_highbyte;
+  unsigned int data_lowbyte;
+  pinMode(cs, OUTPUT);                                       
+  command = AS5048_CMD_READ | AS5048_REG_DATA;                // Set up the command we will send
+  command |= calcEvenParity(command) <<15;                    // assign the parity bit of the command we are sending (error check)
+  cmd_highbyte = highByte(command);                           // split it into bytes
+  cmd_lowbyte = lowByte(command);                             //
+  digitalWrite(cs, LOW);                                      // Drop Cable Select pin to enable the AS5048's
+  data_highbyte = SPI.transfer(cmd_highbyte);                 // send the initial read command
+  data_lowbyte = SPI.transfer(cmd_lowbyte);
+  digitalWrite(cs, HIGH);                                     // disable the AS5048's
+  digitalWrite(cs, LOW);                                      // Drop ssl to enable the AS5048's
+  data_highbyte = SPI.transfer(cmd_highbyte);                 // send the initial read command
+  data_lowbyte = SPI.transfer(cmd_lowbyte);
+  digitalWrite(cs, HIGH);                                     // disable the AS5048's  
+  data = data_highbyte;                                       // Store the high byte in my 16 bit varriable
+  data = data << 8;                                           // shift left 8 bits
+  data = data | data_lowbyte;                                 // tack on the low byte
+//  #ifdef DEBUGGING
+//    Serial.println(data);
+//  #endif
+  return data;
 }
 
+/////////////////
+//
+//  circularMean
+//  return the circular mean of the angles using the atan2 method
+//  takes a pointer to an array of angles
+//
+double circularMean( double *anglesToAverage){
+  int j;
+  int k;
+  double totalX = 0;
+  double totalY = 0;
+  double angle = 0;
+  double retVal = 0;
+  k = numToAve;                                               //  
+  for ( j = 0; j < k ; j++) {                                 // Loop through the anglesToAverage array
+    yield();                                                  //  Each time through yied so that WIfi can catch up
+   totalX += cos((double) ((anglesToAverage[j] * PI) / 180)); //  convert angle to radians
+   totalY += sin((double) ((anglesToAverage[j] * PI) / 180)); //  convert angle to radians
+  }                                                           //  strictly speaking the circular mean using the atan2 method is
+                                                              //  defined as taking the mean of the x and y components of each angl
+                                                              //  and using the resulting mean x value and mean y value as inputs to the
+                                                              //  atan2 function, so we should divide the totalX and TotalY by
+                                                              //  the number of values, but in ATAN2 the linear factor does not make
+                                                              //  a difference in the value of the function
+                                                              // 
+                                                              //     i.e. atan2( x , y) = atan2 (mx , my)
+  if ( totalX == 0 && totalY == 0 ) { 
+    angle = 0;                                                // just to be safe assign a value where atan2 is undefined
+  } else {
+    angle = atan2(totalY , totalX);                           // get the arctan of the totalY,totalX value
+    if (angle >= 0) {                                         // if the arctan is positive then it is a positive rotation (CCW)
+                                                              // between 0 and 180 degress
+      retVal = (double) ((angle / PI) * 180);                 // and we can convert it back to degress to send back
+    } else {                                                  // if the arctan is negative...
+      retVal =  (double) ((( 2 * PI ) + angle) / PI ) * 180;  // convert the negative rotation to a positive rotation from 
+                                                              // 0 degrees (CCW) by taking the complement of the angle
+    }
+  }
+  return retVal;
+} // end circularMean
 
+/////////////////
+//
 // pad the Tics value with leading zeros and return a string
+// since sky safari expects a sream of characters and not a number
+// 
 String PadTic(unsigned int tic, String Sign){
   String paddedTic;
   if (tic < 10) 
@@ -213,7 +308,10 @@ String PadTic(unsigned int tic, String Sign){
   return paddedTic;
 }
 
-// Calculate Even parity of word
+/////////////////
+//
+// calcEvenParity of word
+//
 byte calcEvenParity(word value) {
   byte count = 0;
   byte i;
@@ -229,7 +327,12 @@ byte calcEvenParity(word value) {
   // all odd binaries end in 1
   return count & 0x1;
 }
+
+/////////////////
+//
+// readTic
 // This just trims the bottom 14 bits off of a sensor read
+//
 unsigned int readTic(int cs){
   unsigned int rawData;
   unsigned int realData;
@@ -237,33 +340,35 @@ unsigned int readTic(int cs){
   realData = rawData & 0x3fff; 
   return realData;
 }
-// Read the sensor REG_DATA register
-unsigned int readSensor(int cs){
-  unsigned int data;
-  unsigned int data_highbyte;
-  unsigned int data_lowbyte;
-  pinMode(cs, OUTPUT);                                       
-  command = AS5048_CMD_READ | AS5048_REG_DATA;                        // Set up the command we will send
-  command |= calcEvenParity(command) <<15;                            // assign the parity bit
-  cmd_highbyte = highByte(command);                                   // split it into bytes
-  cmd_lowbyte = lowByte(command);                                     //
-  digitalWrite(cs, LOW);                                             // Drop ssl to enable the AS5048's
-  data_highbyte = SPI.transfer(cmd_highbyte);                         // send the initial read command
-  data_lowbyte = SPI.transfer(cmd_lowbyte);
-  digitalWrite(cs, HIGH);                                            // disable the AS5048's
-  digitalWrite(cs, LOW);                                             // Drop ssl to enable the AS5048's
-  data_highbyte = SPI.transfer(cmd_highbyte);                         // send the initial read command
-  data_lowbyte = SPI.transfer(cmd_lowbyte);
-  digitalWrite(cs, HIGH);                                            // disable the AS5048's  
-  data = data_highbyte;                                               // Store the high byte in my 16 bit varriable
-  data = data << 8;                                                   // shift left 8 bits
-  data = data | data_lowbyte;                                         // tack on the low byte
-  #ifdef DEBUGGING
-    Serial.println(data);
-  #endif
-  return data;
-}
 
+
+/////////////////
+//
+//  convert an angle to tics
+//
+unsigned int angleToTics( double angle){
+  unsigned int retVal = 0; 
+  retVal = (unsigned int) (((angle + (increment / 2)) / 360 ) * 16384);
+  if ( retVal > 16383 ) {
+    retVal = retVal - 16384;
+  }
+  return retVal;
+} // end angleToTics
+
+/////////////////
+//
+//  convert tics to angle
+//
+double ticsToAngle ( unsigned int tics) {
+  double retVal;
+  retVal = tics * increment;
+  return retVal;
+} // end ticsToAngle
+
+/////////////////
+//
+//  printWifiSataus
+// 
 void printWifiStatus() {
   // print the SSID of the network you're attached to:
   Serial.print("SSID: ");
@@ -279,133 +384,4 @@ void printWifiStatus() {
   Serial.print("signal strength (RSSI):");
   Serial.print(rssi);
   Serial.println(" dBm");
-}
-
-// advancedCircularSmooth
-// take a new sensor reading, the current advancedCircularSmooth value and an array of past sensor readings
-// return a good estimate of the most likely value that the sensor should read by doing the following
-//
-//   insert the new sensor reading into the oldest position in our array of past sensor readings
-//   create a copy of the array for sorting and averaging
-//   create an array of indexes that will represent the order of the original indicies in the sorted array
-//   for each value in our past sensor values array
-//     calculate the distance from the mean and store that value in a new array of (distance from mean) 
-//   do an insertion sort on this mean distance array and record the transpositions in the index array
-//   throw out the bottom 10% and top 10% of values
-//   use that array to find the new angular mean.
-double advancedCircularSmooth(double newAngle, int axis, double currentCircSmoothValue, double *pastSensorReadings) {
-  int j, k;
-  int bottom, top;
-  static int currentPosition1;  // this is a hack to take into account we are calling this function on two different arrays
-  static int currentPosition2;  //
-  int currentPosition;
-  double tempFloat;
-  int tempInt;
-  double sortedAngles[numToAverage];
-  double sortedDeltas[numToAverage];
-  int sortedIndex[numToAverage];
-  double anglesToAverage[numToAverage - 2 * discardNumber];
-  double currentAverageAngle;
-  // increment the couter based on the axis we are smoothing
-  if ( axis == 1 ) {                                  
-    currentPosition1 = ( currentPosition1 + 1) % numToAverage; 
-    currentPosition = currentPosition1;
-  } else {
-    currentPosition2 = ( currentPosition2 + 1) % numToAverage;
-    currentPosition = currentPosition2;
-  }
-  pastSensorReadings[currentPosition] = newAngle;           // put the new value into the array
-  yield();
-  for ( j = 0; j < numToAverage; j++ ) {
-     sortedAngles[j] = pastSensorReadings[j];               // create our array for sorting
-     sortedDeltas[j] = angularSeparation(currentCircSmoothValue, pastSensorReadings[j]);
-     sortedIndex[j] = j;                                    // create our array of inexes to store sorted order
-  }
-  // do an insertion sort on the deltas array and apply the transformations to the index array
-  // and the sorted Angles array at the same time
-  for ( k = 1 ; k < numToAverage; k++){
-    // for all but the first element look at the remaining elements till a smaller element is found
-    j = k;
-    yield();
-    while (j > 0 && sortedDeltas[j-1] > sortedDeltas[j]) {
-      tempFloat = sortedDeltas[j];
-      sortedDeltas[j] = sortedDeltas[j-1];
-      sortedDeltas[j-1] = tempFloat;
-      tempFloat = sortedAngles[j];
-      sortedAngles[j] = sortedAngles[j-1];
-      sortedAngles[j-1] = tempFloat;
-      tempInt = sortedIndex[j];
-      sortedIndex[j] = sortedIndex[j-1];
-      sortedIndex[j-1] = tempInt;
-      j -= 1;
-      yield();
-    }
-  }
-  // now create a smaller array discarding the top and bottom discardNumber values.
-  for ( j = discardNumber; j < numToAverage - discardNumber; j++ ) {
-    anglesToAverage[j - discardNumber] = sortedAngles[j - discardNumber];  
-  }
-  return (double) circularAverage(anglesToAverage);
-}
-
-// return the circular mean of the angles using the atan2 method
-// takes a pointer to an array of angles
-double circularAverage( double *anglesToAverage){
-  int j;
-  int k;
-  double totalX = 0;
-  double averageX = 0;
-  double totalY = 0;
-  double averageY = 0;
-  double angle = 0;
-  double retVal = 0;
-  k = numToAverage - ( 2 * discardNumber );
-  for ( j = 0; j < k ; j++) { 
-    yield(); 
-   totalX += cos((double) ((anglesToAverage[j] * PI) / 180));
-   totalY += sin((double) ((anglesToAverage[j] * PI) / 180));
-  }
-  averageX = totalX / k;
-  averageY = totalY / k;
-  if ( averageX == 0 && averageY == 0 ) { 
-    angle = 0;                                 // just to be safe define a value where atan2 is undefined
-  } else {
-    angle = atan2(averageY , averageX);
-    if (angle >= 0) {
-      // if the returned value of angle is positive it is a positive rotation (CCW) between 0 and 180 degress
-      retVal = (double) ((angle / PI) * 180);
-    } else {
-      // convert the negative angle to a positive rotation from 0 degrees (CCW)
-      retVal =  (double) ((( 2 * PI ) + angle) / PI ) * 180;
-    }
-  }
-  return retVal;
-}
-
-// convert an angle to tics
-unsigned int angleToTics( double angle){
-  unsigned int retVal = 0; 
-  retVal = (unsigned int) (((angle + (increment / 2)) / 360 ) * 16384);
-  if ( retVal > 16383 ) {
-    retVal = retVal - 16384;
-  }
-  return retVal;
-}
-
-// convert tics to angle
-double ticsToAngle ( unsigned int tics) {
-  double retVal;
-  retVal = tics * increment;
-  return retVal;
-}
-
-// Return the minimal angular separation for two angeles.  Returns between 0 and 180 for any two input values
-double angularSeparation(double angleOne, double angleTwo){
-  double retVal = 0;
-  retVal = fabs(angleOne - angleTwo);
-  if ( retVal > 180 ) {
-   retVal = 360 - retVal; 
-  }
-  return retVal;
-
-}
+} // end printWifiStatus
