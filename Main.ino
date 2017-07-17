@@ -1,6 +1,6 @@
  /*
  
- Well, it actually did not work.  There were two bugs and despite them it gave close to accurate results.
+  Well, it actually did not work.  There were two bugs and despite them it gave close to accurate results.
   1) 2^14 is not 16393 it is 16383.
   2) when you truncate off the bottom 8 bits of a 14 bit number that is only losing about 1.5 degres of precision.
  
@@ -22,21 +22,14 @@
 #include <SPI.h>
 #include <ESP8266WiFi.h>
 
-// Define this if you want to run as an Access Point.  If undefined it will connect to the 
-// SSID with the password below....
-
-#define AP 
-// uncomment the next line to turn on debugging
-//#define DEBUGGING
-
+#define AP                                                  // Define this if you want to run as an Access Point.
+                                                            // If undefined it will connect to the SSID with the password below....
+//#define DEBUGGING                                         // uncomment to turn on debugging
 char ssid[] = "braapppp";                                   //  your network SSID (name)
 char pass[] = "";                                           // your network password (use for WPA, or use as key for WEP)
-
 const char *apssid = "ESPap";
 const char *appassword = "gofish";
-
 int keyIndex = 0;                                           // your network key Index number (needed only for WEP)
-
 int status = WL_IDLE_STATUS;
 
 // These defines are for the AS5048 
@@ -70,16 +63,11 @@ double increment = (double) 360 / 16384;                    // this is the small
                                                             // that is reportable by the sensors
 int i = 0;                                                  // declare a counter
 int del = 2;                                                // 
-
-// the arrays that will store the most recent numToAverage angles
-double smoothAzAngles[numToAve];
-double smoothAltAngles[numToAve];
-// the value of the current Azimuth and Altitude angle that we will report back to Sky Safari
-double smoothAzAngle = 0;
-double smoothAltAngle = 0;
-
+double smoothAzAngles[numToAve];                            // the arrays that will store the most recent numToAverage angles
+double smoothAltAngles[numToAve];                           //
+double smoothAzAngle = 0;                                   // the value of the current Azimuth and Altitude angle that we will 
+double smoothAltAngle = 0;                                  // report back to Sky Safari
 WiFiServer server(23);                                      // define an instance of a WIfi Server called 'server'
-
 boolean alreadyConnected = false;                           // whether or not the client was connected previously
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -105,28 +93,25 @@ void setup() {
       delay(5000);                                          // wait 5 seconds for connection:
     }
   #endif
-
-  
-  server.begin();                             // start the server:
-  // you're connected now, so print out the status:
-  #ifdef AP
-  #else
-    printWifiStatus();
+ 
+  server.begin();                                           // start the WIfi server:
+  #ifdef AP                                                 // if we are an access point....
+  #else                                                     // if we are connecting to an AP
+    printWifiStatus();                                      // you're connected now, so print out the status:
   #endif
   
   SPI.begin();                                              // Wake up the buss
   SPI.setBitOrder(MSBFIRST);                                // AS5048 is a Most Significant Bit first
   SPI.setDataMode(SPI_MODE1);                               // AS5048 uses Mode 1
-  // fill up our smoothing arrays with data
-  for (i = 0; i < numToAve; i++){
-    rawData = readTic(azPin);
-    smoothAzAngles[i] = ticsToAngle(rawData);
-    rawData = readTic(altPin);
-    smoothAltAngles[i] = ticsToAngle(rawData);
-  }
+  for (i = 0; i < numToAve; i++){                           // fill up our smoothing arrays with data
+    rawData = readTic(azPin);                               // read the azimuth pin
+    smoothAzAngles[i] = ticsToAngle(rawData);               // smooth the angle ( we should probably just ignore this in setup )
+    rawData = readTic(altPin);                              // read the altitude pin
+    smoothAltAngles[i] = ticsToAngle(rawData);              // since we are just filling up the array with data smoothing might not make
+  }                                                         // sense here.....
   curArrayPos = numToAve - 1;                               // set our position counter so that we know where the oldest value is
                                                             // in this case it is the last element of the array numToAve - 1
-} // end setup
+} // end setup()
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -171,13 +156,13 @@ void loop() {
   delay(del);                                               // and hang for a bit...
   
   WiFiClient thisClient = server.available();               // wait for a new client:  
-  Serial.println("Waiting");
+  Serial.println("Waiting");                                // let the console know what we are doing
 
-  while (thisClient) {                                      // wait for a connection from SkySafari
+  while (thisClient) {                                      // if we have a connection then thisClient will be non-zero 
     if (!alreadyConnected) {                                // if this is a not a new connection
       alreadyConnected = true;                              // say we have a connection
     }
-    if (thisClient.connected()) {                           // if we are connected to a client
+    if (thisClient.connected()) {                           // if we are connected to a client with characters to be read
       if (thisClient.available() > 0) {                     //  if there are chars to read.
                                                             //    this is where we need to actually read what the client
                                                             //    is sending but we assume that what is sent is a R = read
@@ -217,8 +202,7 @@ void loop() {
 //
 // readSensor
 // Read the sensor REG_DATA register
-// WARNING: this data might be meaningless!  The previous data packet might have triggered a read
-//          and thus the buffer is stale
+// we send two read commands so that the REG_DATA will have the results of a read command
 //
 unsigned int readSensor(int cs){
   unsigned int data;
@@ -229,22 +213,23 @@ unsigned int readSensor(int cs){
   command |= calcEvenParity(command) <<15;                    // assign the parity bit of the command we are sending (error check)
   cmd_highbyte = highByte(command);                           // split it into bytes
   cmd_lowbyte = lowByte(command);                             //
-  digitalWrite(cs, LOW);                                      // Drop Cable Select pin to enable the AS5048's
+  digitalWrite(cs, LOW);                                      // Drop Cable Select pin to enable the AS5048
   data_highbyte = SPI.transfer(cmd_highbyte);                 // send the initial read command
   data_lowbyte = SPI.transfer(cmd_lowbyte);
   digitalWrite(cs, HIGH);                                     // disable the AS5048's
   digitalWrite(cs, LOW);                                      // Drop ssl to enable the AS5048's
-  data_highbyte = SPI.transfer(cmd_highbyte);                 // send the initial read command
-  data_lowbyte = SPI.transfer(cmd_lowbyte);
-  digitalWrite(cs, HIGH);                                     // disable the AS5048's  
+  data_highbyte = SPI.transfer(cmd_highbyte);                 // send a second read command
+  data_lowbyte = SPI.transfer(cmd_lowbyte);                   //
+  digitalWrite(cs, HIGH);                                     // Bring CS high again to disable the AS5048 
   data = data_highbyte;                                       // Store the high byte in my 16 bit varriable
   data = data << 8;                                           // shift left 8 bits
   data = data | data_lowbyte;                                 // tack on the low byte
 //  #ifdef DEBUGGING
 //    Serial.println(data);
 //  #endif
-  return data;
+  return data;                                                // and return the full 16 bits of data
 }
+// end readSensor(cs)
 
 /////////////////
 //
@@ -262,15 +247,14 @@ double circularMean( double *anglesToAverage){
   k = numToAve;                                               //  
   for ( j = 0; j < k ; j++) {                                 // Loop through the anglesToAverage array
     yield();                                                  //  Each time through yied so that WIfi can catch up
-   totalX += cos((double) ((anglesToAverage[j] * PI) / 180)); //  convert angle to radians
-   totalY += sin((double) ((anglesToAverage[j] * PI) / 180)); //  convert angle to radians
+   totalX += cos((double) ((anglesToAverage[j] * PI) / 180)); //  convert angle to radians and add it to our totalX
+   totalY += sin((double) ((anglesToAverage[j] * PI) / 180)); //  convert angle to radians and add it to our totalY
   }                                                           //  strictly speaking the circular mean using the atan2 method is
-                                                              //  defined as taking the mean of the x and y components of each angl
+                                                              //  defined as taking the mean of the x and y components of each angle
                                                               //  and using the resulting mean x value and mean y value as inputs to the
                                                               //  atan2 function, so we should divide the totalX and TotalY by
                                                               //  the number of values, but in ATAN2 the linear factor does not make
                                                               //  a difference in the value of the function
-                                                              // 
                                                               //     i.e. atan2( x , y) = atan2 (mx , my)
   if ( totalX == 0 && totalY == 0 ) { 
     angle = 0;                                                // just to be safe assign a value where atan2 is undefined
@@ -285,12 +269,13 @@ double circularMean( double *anglesToAverage){
     }
   }
   return retVal;
-} // end circularMean
+} // end circularMean(*anglesToAverage)
 
 /////////////////
 //
-// pad the Tics value with leading zeros and return a string
-// since sky safari expects a sream of characters and not a number
+// padTic
+// pad the Tics value with leading zeros and a plus sign and return a string
+// since sky safari expects a sream of characters "+nnnnn and not a number
 // 
 String PadTic(unsigned int tic, String Sign){
   String paddedTic;
@@ -306,7 +291,7 @@ String PadTic(unsigned int tic, String Sign){
     paddedTic = "" + String(tic);
   paddedTic = Sign + paddedTic;
   return paddedTic;
-}
+} // end padTic(tic,sign)
 
 /////////////////
 //
@@ -314,19 +299,15 @@ String PadTic(unsigned int tic, String Sign){
 //
 byte calcEvenParity(word value) {
   byte count = 0;
-  byte i;
-  // loop through the 16 bits 
-  for (i = 0; i < 16; i++) {
-    // if the rightmost bit is 1 increment our counter
-    if (value & 0x1) {
-      count++;
-    }
-    // shift off the rightmost bit
-    value >>=1;
-  }
-  // all odd binaries end in 1
-  return count & 0x1;
-}
+  byte i; 
+  for (i = 0; i < 16; i++) {																	  	// loop through the 16 bits counting the 1's
+    if (value & 0x1) {																						// 	if the rightmost bit is 1 
+      count++;																										// 	increment our counter
+    }																															// 	and then 
+    value >>=1;																										// 	shift off the rightmost bit
+  }																																
+  return count & 0x1;																							// all odd binaries end in 1
+} // end calcEvenParity(value)
 
 /////////////////
 //
@@ -339,7 +320,7 @@ unsigned int readTic(int cs){
   rawData = readSensor(cs);
   realData = rawData & 0x3fff; 
   return realData;
-}
+} // end readTic(cs)
 
 
 /////////////////
@@ -353,7 +334,7 @@ unsigned int angleToTics( double angle){
     retVal = retVal - 16384;
   }
   return retVal;
-} // end angleToTics
+} // end angleToTics(angle)
 
 /////////////////
 //
