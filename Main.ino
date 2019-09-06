@@ -1,14 +1,4 @@
  /*
- Based on: 
- Chat  Server
-
- created 18 Dec 2009
- by David A. Mellis
- modified 31 May 2012
- by Tom Igoe
-
- Modified to accept connections from SkySafari over the network and send back angle data
- from AS5048 angle sensors
 
  Thanks to the folks at ZoetropeLabs for example code to access the AS5048's
  https://github.com/ZoetropeLabs/AS5048A-Arduino
@@ -47,11 +37,11 @@
 // uncomment the next line to turn on debugging
 //#define DEBUGGING
 
-char ssid[] = "braapppp"; //  your network SSID (name)
-char pass[] = "";    // your network password (use for WPA, or use as key for WEP)
+char ssid[] = "";       //  your network SSID (name)
+char pass[] = "";       // your network password (use for WPA, or use as key for WEP)
 
-const char *apssid = "ESPap";
-const char *appassword = "gofish";
+const char *apssid = "ESPap";   // The SSID of the access point that the esp will create
+const char *appassword = "";    // the password for connecting to the esp access point.
 
 int keyIndex = 0;            // your network key Index number (needed only for WEP)
 
